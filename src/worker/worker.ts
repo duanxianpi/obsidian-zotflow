@@ -138,6 +138,38 @@ function assertInitialized() {
     }
 }
 
+// `Response` and `Headers` globals are unavailable in Obsidian's blob worker
+// context. This helper builds a fetch-compatible Response object from the
+// values returned by Obsidian's requestUrl bridge.
+function makeResponse(
+    body: ArrayBuffer | null,
+    status: number,
+    headers: Record<string, string>,
+): Response {
+    const hdrs = headers || {};
+    const headersObj = {
+        get: (name: string) => {
+            const key = Object.keys(hdrs).find(
+                (k) => k.toLowerCase() === name.toLowerCase(),
+            );
+            return key != null ? hdrs[key] : null;
+        },
+        has: (name: string) =>
+            Object.keys(hdrs).some(
+                (k) => k.toLowerCase() === name.toLowerCase(),
+            ),
+    } as unknown as Headers;
+    return {
+        status,
+        ok: status >= 200 && status < 300,
+        headers: headersObj,
+        json: async () =>
+            JSON.parse(new TextDecoder().decode(body ?? new ArrayBuffer(0))),
+        text: async () => (body ? new TextDecoder().decode(body) : ""),
+        arrayBuffer: async () => body ?? new ArrayBuffer(0),
+    } as unknown as Response;
+}
+
 const exposedApi: WorkerAPI = {
     init: (
         settings: ZotFlowSettings,
@@ -157,22 +189,14 @@ const exposedApi: WorkerAPI = {
                     contentType: "application/json",
                 });
 
-                // Handle empty response bodies
-                if (
+                // `Response` and `Headers` are not available in Obsidian's blob
+                // worker context, so we build a compatible object directly.
+                const body =
                     !response.arrayBuffer ||
                     response.arrayBuffer.byteLength === 0
-                ) {
-                    return new Response(null, {
-                        status: response.status,
-                        headers: new Headers(response.headers),
-                    });
-                }
-
-                // Convert Obsidian Bridge response to standard Response object
-                return new Response(response.arrayBuffer, {
-                    status: response.status,
-                    headers: new Headers(response.headers),
-                });
+                        ? null
+                        : response.arrayBuffer;
+                return makeResponse(body, response.status, response.headers);
             } catch (e) {
                 throw new TypeError(
                     `Network Request Failed: ${(e as Error).message}`,
