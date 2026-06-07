@@ -19,6 +19,19 @@ export class WebDavService {
      * @returns The file content as an ArrayBuffer.
      */
     async downloadFile(remotePath: string): Promise<ArrayBuffer> {
+        const startedAt = Date.now();
+        this.parentHost.log(
+            "debug",
+            "WebDAV download requested.",
+            "WebDavService",
+            {
+                remotePath,
+                hasUrl: !!this.settings.webDavUrl,
+                hasUser: !!this.settings.webDavUser,
+                hasPassword: !!this.settings.webdavpassword,
+            },
+        );
+
         if (
             !this.settings.webDavUrl ||
             !this.settings.webDavUser ||
@@ -37,6 +50,10 @@ export class WebDavService {
             baseUrl += "/";
         }
         const fullUrl = baseUrl + remotePath.replace(/^\//, ""); // Ensure single slash join
+        this.parentHost.log("debug", "WebDAV URL resolved.", "WebDavService", {
+            baseUrl,
+            fullUrl,
+        });
 
         const credentials = btoa(
             `${this.settings.webDavUser}:${this.settings.webdavpassword}`,
@@ -50,13 +67,54 @@ export class WebDavService {
                 },
             };
 
+            this.parentHost.log(
+                "debug",
+                "WebDAV fetch dispatching.",
+                "WebDavService",
+                {
+                    method: req.method,
+                    fullUrl,
+                },
+            );
+
             const response = await fetch(fullUrl, req);
+            const responseMs = Date.now() - startedAt;
+            this.parentHost.log(
+                "debug",
+                "WebDAV fetch completed.",
+                "WebDavService",
+                {
+                    status: response.status,
+                    statusText: response.statusText,
+                    ok: response.ok,
+                    elapsedMs: responseMs,
+                },
+            );
 
             if (response.ok) {
-                return await response.arrayBuffer();
+                const payload = await response.arrayBuffer();
+                this.parentHost.log(
+                    "debug",
+                    "WebDAV payload received.",
+                    "WebDavService",
+                    {
+                        bytes: payload.byteLength,
+                        elapsedMs: Date.now() - startedAt,
+                    },
+                );
+                return payload;
             } else {
                 // Map HTTP status to ZotFlowError
                 if (response.status === 401 || response.status === 403) {
+                    this.parentHost.log(
+                        "debug",
+                        "WebDAV auth rejection received.",
+                        "WebDavService",
+                        {
+                            status: response.status,
+                            fullUrl,
+                        },
+                    );
                     throw new ZotFlowError(
                         ZotFlowErrorCode.AUTH_INVALID,
                         "WebDavService",
@@ -64,12 +122,32 @@ export class WebDavService {
                     );
                 }
                 if (response.status === 404) {
+                    this.parentHost.log(
+                        "debug",
+                        "WebDAV resource not found.",
+                        "WebDavService",
+                        {
+                            status: response.status,
+                            fullUrl,
+                        },
+                    );
                     throw new ZotFlowError(
                         ZotFlowErrorCode.RESOURCE_MISSING,
                         "WebDavService",
                         `WebDAV File Not Found: ${fullUrl}`,
                     );
                 }
+
+                this.parentHost.log(
+                    "debug",
+                    "WebDAV returned unexpected non-success status.",
+                    "WebDavService",
+                    {
+                        status: response.status,
+                        statusText: response.statusText,
+                        fullUrl,
+                    },
+                );
 
                 throw new ZotFlowError(
                     ZotFlowErrorCode.NETWORK_ERROR,
@@ -78,6 +156,17 @@ export class WebDavService {
                 );
             }
         } catch (e: any) {
+            this.parentHost.log(
+                "debug",
+                "WebDAV download raised exception.",
+                "WebDavService",
+                {
+                    remotePath,
+                    fullUrl,
+                    elapsedMs: Date.now() - startedAt,
+                    errorMessage: e instanceof Error ? e.message : String(e),
+                },
+            );
             throw ZotFlowError.wrap(
                 e,
                 ZotFlowErrorCode.NETWORK_ERROR,
