@@ -158,6 +158,17 @@ export class TaskManager {
         attachmentService: AttachmentService,
         attachmentItem: IDBZoteroItem<AttachmentData>,
     ): Promise<Blob> {
+        const startedAt = Date.now();
+        this.parentHost.log(
+            "debug",
+            "Creating download attachment task.",
+            "TaskManager",
+            {
+                libraryID: attachmentItem.libraryID,
+                itemKey: attachmentItem.key,
+                filename: attachmentItem.raw.data.filename,
+            },
+        );
         const { DownloadAttachmentTask } =
             await import("./impl/download-attachment-task");
         const task = new DownloadAttachmentTask(
@@ -169,17 +180,70 @@ export class TaskManager {
 
         const controller = new AbortController();
         this.activeControllers.set(task.id, controller);
+        this.parentHost.log(
+            "debug",
+            "Download attachment task registered and controller created.",
+            "TaskManager",
+            {
+                taskId: task.id,
+                itemKey: attachmentItem.key,
+                activeControllers: this.activeControllers.size,
+            },
+        );
 
         try {
+            this.parentHost.log(
+                "debug",
+                "Executing download attachment task.",
+                "TaskManager",
+                {
+                    taskId: task.id,
+                    itemKey: attachmentItem.key,
+                },
+            );
             await task.execute(controller.signal);
 
             const blob = task.getBlob();
             if (!blob) {
                 throw new Error(`Download failed for ${attachmentItem.key}`);
             }
+            this.parentHost.log(
+                "debug",
+                "Download attachment task completed successfully.",
+                "TaskManager",
+                {
+                    taskId: task.id,
+                    itemKey: attachmentItem.key,
+                    blobBytes: blob.size,
+                    elapsedMs: Date.now() - startedAt,
+                },
+            );
             return blob;
+        } catch (e) {
+            this.parentHost.log(
+                "debug",
+                "Download attachment task failed.",
+                "TaskManager",
+                {
+                    taskId: task.id,
+                    itemKey: attachmentItem.key,
+                    elapsedMs: Date.now() - startedAt,
+                    errorMessage: e instanceof Error ? e.message : String(e),
+                },
+            );
+            throw e;
         } finally {
             this.activeControllers.delete(task.id);
+            this.parentHost.log(
+                "debug",
+                "Download attachment task controller removed.",
+                "TaskManager",
+                {
+                    taskId: task.id,
+                    itemKey: attachmentItem.key,
+                    activeControllers: this.activeControllers.size,
+                },
+            );
         }
     }
 
