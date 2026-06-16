@@ -104,11 +104,11 @@ export type AnyIDBZoteroItem = {
     [K in keyof ZoteroItemDataTypeMap]: IDBZoteroItem<ZoteroItemDataTypeMap[K]>;
 }[keyof ZoteroItemDataTypeMap];
 
-/** Cached attachment file blob with metadata for LRU eviction. */
+/** Cached attachment file bytes with metadata for LRU eviction. */
 export interface IDBZoteroFile {
     libraryID: number; // Library ID (User or Group ID)
     key: string; // Zotero Item Key (itemType='attachment')
-    blob: Blob; // File Blob
+    buffer: ArrayBuffer; // File bytes (stored inline as ArrayBuffer, not Blob — see AttachmentService for the WebKit/iPadOS rationale)
     mimeType: string;
     fileName: string;
     md5: string; // File MD5 (API returned), used to determine if re-download is needed
