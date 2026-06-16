@@ -134,7 +134,26 @@ export class AttachmentService {
                             `Cache HIT for ${itemKey}`,
                             "AttachmentService",
                         );
-                        // Non-blocking access time update
+
+                        // WebKit/iPadOS: a Blob handle returned from IndexedDB
+                        // is backed by the store and detaches the instant a
+                        // concurrent write touches the same row, OR lazily once
+                        // it is structured-cloned across the Worker→main
+                        // boundary. Reading it later then throws
+                        // `NotFoundError: The object can not be found here.`
+                        // Materialize the bytes HERE — while the handle is
+                        // guaranteed live and before any access-time write — and
+                        // return a fresh in-memory Blob whose bytes travel with
+                        // the structured clone. If this read fails, the
+                        // surrounding catch falls through to a re-download.
+                        const cachedBuffer = await cached.blob.arrayBuffer();
+                        const result = new Blob([cachedBuffer], {
+                            type: cached.mimeType || cached.blob.type,
+                        });
+
+                        // Fire-and-forget access-time bump — AFTER the bytes are
+                        // materialized, keyed by primary key so it can never race
+                        // the read above.
                         db.files
                             .update([libraryID, itemKey], {
                                 lastAccessedAt: new Date().toISOString(),
@@ -159,7 +178,7 @@ export class AttachmentService {
                                 serverMd5: serverMd5 || null,
                             },
                         );
-                        return cached.blob;
+                        return result;
                     } else {
                         this.parentHost.log(
                             "warn",
