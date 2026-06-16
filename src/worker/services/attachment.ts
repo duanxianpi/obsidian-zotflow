@@ -135,9 +135,19 @@ export class AttachmentService {
                             "AttachmentService",
                         );
                         // Non-blocking access time update
-                        db.files.update(cached, {
-                            lastAccessedAt: new Date().toISOString(),
-                        });
+                        db.files
+                            .update([libraryID, itemKey], {
+                                lastAccessedAt: new Date().toISOString(),
+                            })
+                            .catch((e) =>
+                                this.parentHost.log(
+                                    "warn",
+                                    "Access-time update failed",
+                                    "AttachmentService",
+                                    e,
+                                ),
+                            );
+
                         this.parentHost.log(
                             "debug",
                             "Cache entry accepted.",
@@ -149,22 +159,7 @@ export class AttachmentService {
                                 serverMd5: serverMd5 || null,
                             },
                         );
-
-                        // WebKit/iPadOS: a Blob read from IndexedDB is cloned
-                        // *by reference* across the Worker→main postMessage
-                        // boundary, so the Comlink call resolves immediately but
-                        // the bytes are loaded lazily on the main thread. By then
-                        // the IDB-backed handle can be stale, and reading it
-                        // (e.g. `blob.arrayBuffer()`) throws a DataCloneError
-                        // ("The object can not be found here."). Materialize the
-                        // bytes here — while the handle is still valid in the
-                        // worker — and return a fresh in-memory Blob whose bytes
-                        // travel with the structured clone. If this read fails,
-                        // the surrounding catch falls through to a re-download.
-                        const cachedBuffer = await cached.blob.arrayBuffer();
-                        return new Blob([cachedBuffer], {
-                            type: cached.mimeType || cached.blob.type,
-                        });
+                        return cached.blob;
                     } else {
                         this.parentHost.log(
                             "warn",
