@@ -80,6 +80,15 @@ export class ZotFlowDB extends Dexie {
                 lastAccessedAt
             `,
         });
+
+        // v4: Store cached file bytes as ArrayBuffer instead of Blob.
+        // WebKit/iPadOS IndexedDB Blob handles detach intermittently, causing
+        // spurious read failures and needless re-downloads. The indexes are
+        // unchanged, but old records hold a `blob` field the new code no longer
+        // reads; the cache is fully regenerable from Zotero, so clear it.
+        this.version(4).upgrade(async (tx) => {
+            await tx.table("files").clear();
+        });
     }
 }
 

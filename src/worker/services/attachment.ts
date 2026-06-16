@@ -135,20 +135,19 @@ export class AttachmentService {
                             "AttachmentService",
                         );
 
-                        // WebKit/iPadOS: a Blob handle returned from IndexedDB
-                        // is backed by the store and detaches the instant a
-                        // concurrent write touches the same row, OR lazily once
-                        // it is structured-cloned across the Worker→main
-                        // boundary. Reading it later then throws
-                        // `NotFoundError: The object can not be found here.`
-                        // Materialize the bytes HERE — while the handle is
-                        // guaranteed live and before any access-time write — and
-                        // return a fresh in-memory Blob whose bytes travel with
-                        // the structured clone. If this read fails, the
-                        // surrounding catch falls through to a re-download.
-                        const cachedBuffer = await cached.blob.arrayBuffer();
-                        const result = new Blob([cachedBuffer], {
-                            type: cached.mimeType || cached.blob.type,
+                        // The cache stores raw ArrayBuffer (not Blob): on
+                        // WebKit/iPadOS an IndexedDB Blob handle detaches
+                        // intermittently — when a concurrent write touches the
+                        // row, or once the read transaction auto-commits before
+                        // an async `blob.arrayBuffer()` resolves — throwing
+                        // `NotFoundError: The object can not be found here.` and
+                        // forcing needless re-downloads. An ArrayBuffer is
+                        // serialized inline, so the copy returned by `.get()` is
+                        // always fully in memory; the Blob below is constructed
+                        // synchronously and is safe to clone across the
+                        // Worker→main boundary.
+                        const result = new Blob([cached.buffer], {
+                            type: cached.mimeType,
                         });
 
                         // Fire-and-forget access-time bump — AFTER the bytes are
@@ -521,7 +520,7 @@ export class AttachmentService {
                     const fileRecord: IDBZoteroFile = {
                         libraryID: item.libraryID,
                         key: item.key,
-                        blob: blob,
+                        buffer: buffer,
                         mimeType:
                             item.raw.data.contentType || "application/pdf",
                         fileName: item.raw.data.filename || "file.pdf",
