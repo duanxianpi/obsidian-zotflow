@@ -7,6 +7,12 @@ import {
 } from "./zotero";
 import { ZoteroItemData, ZoteroItemDataTypeMap } from "./zotero-item";
 
+/** Key-value cache entry for the CSL renderer (styles, locales, index). */
+export interface IDBCslCacheEntry {
+    key: string;
+    value: string;
+}
+
 /** Stored Zotero API key with associated group membership. */
 export interface IDBZoteroKey extends ZoteroKey {
     joinedGroups: number[]; // Array of Group IDs the key has access to

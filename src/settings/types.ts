@@ -1,4 +1,5 @@
 import type { CustomReaderTheme } from "types/zotero-reader";
+import type { OutputFormat as CslOutputFormat } from "worker/csl";
 
 /** Per-library sync mode. */
 export type LibrarySyncMode = "bidirectional" | "readonly" | "ignored";
@@ -11,7 +12,13 @@ export type ReaderColorScheme =
     | "obsidian-theme";
 
 /** Settings tab identifier. */
-export type TabSection = "sync" | "webdav" | "cache" | "general" | "citation";
+export type TabSection =
+    | "sync"
+    | "webdav"
+    | "cache"
+    | "general"
+    | "citation"
+    | "csl";
 
 /** Sort order for collections in the tree view. */
 export type CollectionSortOrder = "name-asc" | "name-desc";
@@ -78,7 +85,22 @@ export interface ZotFlowSettings {
     autoPurgeTrashedSourceNotes: boolean;
     autoDisableNoteImageTextTools: boolean;
     epubFontFamily: string;
+    /** CSL renderer: default style id (slug or custom style key). */
+    cslDefaultStyleId: string;
+    /** CSL renderer: default BCP-47 locale, e.g. "en-US". */
+    cslDefaultLocale: string;
+    /** CSL renderer: default output format. */
+    cslDefaultFormat: CslOutputFormat;
+    /** Vault-relative folder scanned for custom .csl styles; "" disables. */
+    cslStylesFolder: string;
+    /** URL template for style downloads; {id} is replaced with the slug. */
+    cslStyleUrlTemplate: string;
+    /** URL template for locale downloads; {lang} is replaced with the tag. */
+    cslLocaleUrlTemplate: string;
 }
+
+/** Re-exported so main-thread settings UI can reference the format union. */
+export type { CslOutputFormat };
 
 /** Persisted reader view state for a single attachment (local or zotero). */
 export interface ViewStateEntry {
@@ -140,6 +162,13 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     autoPurgeTrashedSourceNotes: false,
     autoDisableNoteImageTextTools: true,
     epubFontFamily: "",
+    cslDefaultStyleId: "apa",
+    cslDefaultLocale: "en-US",
+    cslDefaultFormat: "markdown",
+    cslStylesFolder: "",
+    cslStyleUrlTemplate: "https://www.zotero.org/styles/{id}",
+    cslLocaleUrlTemplate:
+        "https://raw.githubusercontent.com/citation-style-language/locales/master/locales-{lang}.xml",
 };
 
 /** Default shape of the full `data.json` blob (settings + view states). */

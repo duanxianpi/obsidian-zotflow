@@ -4,6 +4,7 @@ import { WebDavSection } from "./sections/webdav-section";
 import { CacheSection } from "./sections/cache-section";
 import { GeneralSection } from "./sections/general-section";
 import { CitationSection } from "./sections/citation-section";
+import { CslSection } from "./sections/csl-section";
 
 import type ZotFlow from "main";
 import type { TabSection } from "./types";
@@ -72,6 +73,10 @@ export class ZotFlowSettingTab extends PluginSettingTab {
                 );
                 citationSection.render(contentContainer);
                 break;
+            case "csl":
+                const cslSection = new CslSection(this.plugin, refreshUI);
+                await cslSection.render(contentContainer);
+                break;
         }
     }
 
@@ -91,6 +96,7 @@ export class ZotFlowSettingTab extends PluginSettingTab {
             { id: "webdav", label: "WebDAV", icon: "cloud" },
             { id: "cache", label: "Cache", icon: "database" },
             { id: "citation", label: "Citation", icon: "quote" },
+            { id: "csl", label: "CSL Render", icon: "book-marked" },
         ];
 
         tabs.forEach((tab) => {

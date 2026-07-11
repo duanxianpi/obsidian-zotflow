@@ -5,6 +5,7 @@ import { TasksView } from "./TasksView";
 import { TelemetryView } from "./TelemetryView";
 import { TemplateTestView } from "./TemplateTestView";
 import { RepairView } from "./RepairView";
+import { CslStylesView } from "./CslStylesView";
 
 /** Tab container React component with Sync, Tasks, Telemetry, Template, and Repair tabs. */
 export const ZotFlowActivityCenter: React.FC = () => {
@@ -14,6 +15,7 @@ export const ZotFlowActivityCenter: React.FC = () => {
         { id: "sync", label: "Sync", icon: "refresh-cw" },
         { id: "tasks", label: "Tasks", icon: "list" },
         { id: "template", label: "Template", icon: "code" },
+        { id: "csl", label: "CSL", icon: "book-marked" },
         { id: "repair", label: "Repair", icon: "wrench" },
         { id: "telemetry", label: "Telemetry", icon: "activity" },
     ];
@@ -45,6 +47,7 @@ export const ZotFlowActivityCenter: React.FC = () => {
                 {activeTab === "tasks" && <TasksView />}
                 {activeTab === "telemetry" && <TelemetryView />}
                 {activeTab === "template" && <TemplateTestView />}
+                {activeTab === "csl" && <CslStylesView />}
                 {activeTab === "repair" && <RepairView />}
             </div>
         </>

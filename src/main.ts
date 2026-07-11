@@ -37,6 +37,7 @@ import { checkFile, readTextFile, renameFile, deleteFile } from "utils/file";
 import { ActivityCenterModal } from "ui/activity-center/modal";
 import { ZoteroSearchModal } from "ui/modals/suggest";
 import { AttachmentSelectModal } from "ui/modals/attachment-suggest";
+import { CslFolderService } from "services/csl-folder-service";
 
 import type {
     ZotFlowSettings,
@@ -64,6 +65,7 @@ export default class ZotFlow extends Plugin {
     settings: ZotFlowSettings;
     viewStates: Record<string, ViewStateEntry>;
     customThemes: CustomReaderTheme[] = [];
+    cslFolder: CslFolderService;
     private citationSuggest: CitationSuggest;
     private sourceNoteActionElements = new WeakMap<MarkdownView, HTMLElement>();
 
@@ -406,6 +408,7 @@ export default class ZotFlow extends Plugin {
             this.app.vault.on("rename", (file, oldPath) => {
                 services.viewStateService.renameViewState(oldPath, file.path);
                 this.handleSidecarRename(file, oldPath);
+                void this.cslFolder.onRename(file, oldPath);
             }),
         );
 
@@ -414,8 +417,28 @@ export default class ZotFlow extends Plugin {
             this.app.vault.on("delete", (file) => {
                 services.viewStateService.deleteViewState(file.path);
                 this.handleSidecarDelete(file);
+                void this.cslFolder.onDelete(file);
             }),
         );
+
+        // Hot-load custom CSL styles/locales from the configured vault folder.
+        // create/modify are registered after layout-ready: "create" fires for
+        // every existing file during startup indexing otherwise.
+        this.cslFolder = new CslFolderService(this.app.vault);
+        this.cslFolder.setFolder(this.settings.cslStylesFolder);
+        this.app.workspace.onLayoutReady(() => {
+            void this.cslFolder.rescan();
+            this.registerEvent(
+                this.app.vault.on("create", (file) => {
+                    void this.cslFolder.onCreateOrModify(file);
+                }),
+            );
+            this.registerEvent(
+                this.app.vault.on("modify", (file) => {
+                    void this.cslFolder.onCreateOrModify(file);
+                }),
+            );
+        });
 
         // Add right-click "Update source note" entries for source notes
         this.registerEvent(

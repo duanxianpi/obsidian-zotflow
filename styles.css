@@ -2130,3 +2130,131 @@ body.zotflow-hide-region-markers .cm-zotflow-end-line-note {
 body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     display: none;
 }
+
+/* ══════════════ CSL Render (Activity Center CSL tab) ══════════════ */
+
+.zotflow-csl-view {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.zotflow-csl-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+    margin-top: 8px;
+}
+
+.zotflow-csl-list {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    padding: 4px 8px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.zotflow-csl-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.zotflow-csl-row:last-child {
+    border-bottom: none;
+}
+
+.zotflow-csl-row-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.zotflow-csl-row-title {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.zotflow-csl-row-meta {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.zotflow-csl-badge {
+    flex-shrink: 0;
+    font-size: var(--font-ui-smaller);
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.zotflow-csl-badge-ready {
+    background-color: rgba(var(--color-green-rgb), 0.18);
+    color: var(--color-green);
+}
+
+.zotflow-csl-badge-resolvable {
+    background-color: rgba(var(--color-yellow-rgb), 0.18);
+    color: var(--color-yellow);
+}
+
+.zotflow-csl-badge-unavailable {
+    background-color: rgba(var(--color-red-rgb), 0.15);
+    color: var(--color-red);
+}
+
+.zotflow-csl-muted {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-csl-add-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    padding: 8px;
+}
+
+.zotflow-csl-add-panel input[type="text"],
+.zotflow-csl-add-panel textarea {
+    width: 100%;
+}
+
+.zotflow-csl-add-panel textarea {
+    font-family: var(--font-monospace);
+}
+
+.zotflow-csl-add-locale {
+    flex-direction: row;
+    align-items: center;
+}
+
+.zotflow-csl-add-locale input[type="text"] {
+    flex: 1;
+}
+
+.zotflow-csl-search-results {
+    max-height: 180px;
+}
+
+.zotflow-csl-paste summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-csl-paste {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}

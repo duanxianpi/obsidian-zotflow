@@ -1,4 +1,4 @@
-{
+﻿{
     "name": "obsidian-zotflow",
     "version": "1.2.1",
     "description": "Keep your research in flow!",
@@ -14,6 +14,7 @@
         "build:reader": "cd reader/reader && npm install && webpack --config webpack.obsidian.js --mode production",
         "build:plugin": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
         "version": "node version-bump.mjs && git add manifest.json versions.json",
+        "test:csl": "node scripts/test-csl.mjs",
         "lint": "eslint ."
     },
     "keywords": [],
@@ -40,6 +41,7 @@
     "dependencies": {
         "@leeoniya/ufuzzy": "^1.0.19",
         "@types/nunjucks": "^3.2.6",
+        "citeproc": "^2.4.63",
         "clsx": "^2.1.1",
         "comlink": "^4.4.2",
         "dexie": "^4.2.1",

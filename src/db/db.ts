@@ -8,6 +8,7 @@ import type {
     AnyIDBZoteroItem,
     IDBZoteroKey,
     IDBZoteroGroup,
+    IDBCslCacheEntry,
 } from "types/db-schema";
 
 /** Dexie subclass defining the IndexedDB schema for ZotFlow. */
@@ -18,6 +19,7 @@ export class ZotFlowDB extends Dexie {
     collections!: Table<IDBZoteroCollection, [number, string]>;
     libraries!: Table<IDBZoteroLibrary, number>;
     files!: Table<IDBZoteroFile, [number, string]>;
+    cslCache!: Table<IDBCslCacheEntry, string>;
 
     constructor() {
         super("zotflow-dev");
@@ -88,6 +90,11 @@ export class ZotFlowDB extends Dexie {
         // reads; the cache is fully regenerable from Zotero, so clear it.
         this.version(4).upgrade(async (tx) => {
             await tx.table("files").clear();
+        });
+
+        // v5: Key-value cache for the CSL renderer (styles, locales, index).
+        this.version(5).stores({
+            cslCache: "&key",
         });
     }
 }
