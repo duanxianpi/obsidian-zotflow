@@ -134,15 +134,15 @@ export const SectionHeader: React.FC<{
         <span className="zotflow-csl-section-title">{label}</span>
         <span className="zotflow-csl-count">{count}</span>
         <div className="zotflow-csl-section-actions">
-            {checkedAt !== undefined && (
-                <span className="zotflow-csl-checked">
-                    Checked {fmtRelativeTime(checkedAt)}
-                </span>
-            )}
             {onUpdateAll && (
                 <button
                     className="zotflow-csl-textbtn"
                     disabled={busy}
+                    title={
+                        checkedAt !== undefined
+                            ? `Last checked ${fmtRelativeTime(checkedAt)}`
+                            : "Never checked"
+                    }
                     onClick={onUpdateAll}
                 >
                     <ObsidianIcon icon="refresh-cw" />
@@ -212,12 +212,6 @@ export const StyleRowGroup: React.FC<{
                 Update check failed
             </span>,
         );
-    } else if (state === "ready" && style.remote) {
-        metaParts.push(
-            <span key="updated">
-                Updated {fmtRelativeTime(style.remote.fetchedAt)}
-            </span>,
-        );
     }
     if (parentNeeded) {
         metaParts.push(
@@ -281,6 +275,16 @@ export const StyleRowGroup: React.FC<{
                             <span>Download</span>
                         </button>
                     )}
+                    {/* Updated-time sits on the right, matching locale rows. */}
+                    {!isFolder &&
+                        !updateFailed &&
+                        state === "ready" &&
+                        style.remote && (
+                            <span className="zotflow-csl-checked">
+                                Updated{" "}
+                                {fmtRelativeTime(style.remote.fetchedAt)}
+                            </span>
+                        )}
                     {isFolder ? (
                         <button
                             className="clickable-icon"
@@ -398,13 +402,6 @@ export const LocaleRow: React.FC<{
             >
                 {locale.source === "builtin" && (
                     <>
-                        <span
-                            className="zotflow-csl-row-subtle"
-                            title="Bundled with the plugin — updates overlay the built-in copy"
-                        >
-                            <ObsidianIcon icon="package" />
-                            <span>Built-in</span>
-                        </span>
                         {locale.fetchedAt !== undefined && (
                             <span className="zotflow-csl-checked">
                                 Updated {fmtRelativeTime(locale.fetchedAt)}
@@ -418,6 +415,13 @@ export const LocaleRow: React.FC<{
                         >
                             <ObsidianIcon icon="refresh-cw" />
                         </button>
+                        {/* Occupies the delete slot: built-in, not removable. */}
+                        <span
+                            className="zotflow-csl-slot-glyph"
+                            title="Built-in — bundled with the plugin, can't be removed. Updates overlay the bundled copy."
+                        >
+                            <ObsidianIcon icon="package" />
+                        </span>
                     </>
                 )}
                 {locale.source === "folder" && (

@@ -209,8 +209,13 @@ const ITEMS = {
 
 await ensureFixtures();
 const core = await bundleCore();
-const { CslRenderService, MemoryKVStore, UnavailableStyleError, extractStyleMeta } =
-    core;
+const {
+    CslRenderService,
+    MemoryKVStore,
+    UnavailableStyleError,
+    extractStyleMeta,
+    slugFromStyleUri,
+} = core;
 
 const fx = async (name) => readFile(join(FIXTURES, name), "utf8");
 const apa = await fx("apa.csl");
@@ -619,6 +624,126 @@ await test("style preview: rendered sample fetched when available", async () => 
     });
     const noSample = await bareService.previewStyle("apa");
     check(noSample.sample === undefined, "missing sample tolerated");
+});
+
+await test("samples persist for offline Details and refresh on update", async () => {
+    const sampleV1 = JSON.stringify({
+        citation: ["(One, 2020)"],
+        bibliography: '<div class="csl-bib-body">v1</div>',
+    });
+    const sampleV2 = JSON.stringify({
+        citation: ["(Two, 2021)"],
+        bibliography: '<div class="csl-bib-body">v2</div>',
+    });
+    const fetcher = new StubFetcher({
+        "style://apa": apa,
+        "sample://apa": sampleV1,
+    });
+    const service = new CslRenderService({
+        fetcher,
+        store: new MemoryKVStore(),
+        styleUrlTemplate: "style://{id}",
+        localeUrlTemplate: "locale://{lang}",
+        styleSampleUrlTemplate: "sample://{path}",
+    });
+
+    await service.addStyle(await service.previewStyle("apa"));
+
+    fetcher.offline = true;
+    const offline = await service.styleSample("apa");
+    check(
+        offline?.bibliographyHtml.includes("v1") === true,
+        "sample served from cache while offline",
+    );
+    fetcher.offline = false;
+
+    fetcher.routes["sample://apa"] = sampleV2;
+    await service.updateStyle("apa");
+    fetcher.offline = true;
+    const refreshed = await service.styleSample("apa");
+    check(
+        refreshed?.bibliographyHtml.includes("v2") === true,
+        "update refreshed the cached sample",
+    );
+    fetcher.offline = false;
+
+    await service.removeStyle("apa");
+    fetcher.offline = true;
+    check(
+        (await service.styleSample("apa")) === undefined,
+        "sample cleared on remove",
+    );
+});
+
+await test("adding an alias caches the auto-fetched parent's sample too", async () => {
+    const sample = (v) =>
+        JSON.stringify({
+            citation: ["[1]"],
+            bibliography: `<div class="csl-bib-body">${v}</div>`,
+        });
+    const fetcher = new StubFetcher({
+        "style://nature-neuroscience": natureNeuro,
+        "style://nature": nature,
+        "locale://en-GB": enUS,
+        "sample://dependent/nature-neuroscience": sample("alias"),
+        "sample://nature": sample("parent"),
+    });
+    const service = new CslRenderService({
+        fetcher,
+        store: new MemoryKVStore(),
+        styleUrlTemplate: "style://{id}",
+        localeUrlTemplate: "locale://{lang}",
+        styleSampleUrlTemplate: "sample://{path}",
+    });
+    await service.addStyle(await service.previewStyle("nature-neuroscience"));
+
+    fetcher.offline = true;
+    const aliasSample = await service.styleSample("nature-neuroscience");
+    const parentSample = await service.styleSample("nature");
+    check(
+        aliasSample?.bibliographyHtml.includes("alias") === true,
+        "alias sample cached offline",
+    );
+    check(
+        parentSample?.bibliographyHtml.includes("parent") === true,
+        "parent sample cached offline",
+    );
+});
+
+await test("style id: query params stripped, style's own id preferred", async () => {
+    check(
+        slugFromStyleUri("https://www.zotero.org/styles/nature?source=1") ===
+            "nature",
+        "slugFromStyleUri strips query params",
+    );
+    check(
+        slugFromStyleUri("https://www.zotero.org/styles/nature#frag") ===
+            "nature",
+        "slugFromStyleUri strips fragments",
+    );
+
+    const fetcher = new StubFetcher({
+        "https://example.com/some/path/whatever": nature,
+        "style://nature": nature,
+    });
+    const service = new CslRenderService({
+        fetcher,
+        store: new MemoryKVStore(),
+        styleUrlTemplate: "style://{id}",
+        localeUrlTemplate: "locale://{lang}",
+        styleSampleUrlTemplate: "sample://{path}",
+    });
+
+    // URL input with tracking params: fetched from the given URL, but the
+    // id comes from the style's own <info><id> declaration.
+    const fromUrl = await service.previewStyle(
+        "https://example.com/some/path/whatever?source=1",
+    );
+    check(fromUrl.id === "nature", "id derived from the style's declared id");
+
+    // Plain id input with a stray query suffix.
+    const fromId = await service.previewStyle("nature?source=1");
+    check(fromId.id === "nature", "query stripped from plain id input");
 });
 
 await test("meta extraction: citation-format + hasBibliography (never inferred)", async () => {

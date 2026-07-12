@@ -13,7 +13,7 @@ import { UnavailableStyleError } from "./errors";
 import { LocaleStore, normalizeLocale } from "./locales";
 import type { KVStore, ResourceFetcher } from "./ports";
 import { StyleResolver } from "./resolve";
-import { StyleRepository } from "./styles";
+import { bustCache, StyleRepository } from "./styles";
 import type {
 	Availability,
 	CSLItem,
@@ -37,6 +37,7 @@ const DEFAULT_SAMPLE_URL =
 
 const STYLES_CHECKED_KEY = "styles-checked-at";
 const LOCALES_CHECKED_KEY = "locales-checked-at";
+const SAMPLE_PREFIX = "sample:"; // JSON-serialized StyleSample per style id
 
 /** When the last update-all check ran, per section (epoch ms). */
 export interface UpdateStatus {
@@ -182,7 +183,8 @@ export class CslRenderService {
 		if (/^https?:\/\//i.test(trimmed)) {
 			return { id: slugFromStyleUri(trimmed), url: trimmed };
 		}
-		const id = trimmed.replace(/^\/+|\/+$/g, "");
+		// Strip stray query/fragment ("nature?source=1") and slashes.
+		const id = (trimmed.split(/[?#]/)[0] as string).replace(/^\/+|\/+$/g, "");
 		return { id, url: this.styles.styleUrl(id) };
 	}
 
@@ -194,13 +196,15 @@ export class CslRenderService {
 	 */
 	private async fetchSample(
 		id: string,
-		dependent: boolean
+		dependent: boolean,
+		opts?: { fresh?: boolean }
 	): Promise<StyleSample | undefined> {
 		const paths = dependent ? [`dependent/${id}`, id] : [id, `dependent/${id}`];
 		for (const path of paths) {
 			try {
+				const url = this.sampleUrlTemplate.replace("{path}", path);
 				const raw = await this.fetcher.fetchText(
-					this.sampleUrlTemplate.replace("{path}", path)
+					opts?.fresh ? bustCache(url) : url
 				);
 				const parsed = JSON.parse(raw) as {
 					citation?: unknown;
@@ -222,18 +226,58 @@ export class CslRenderService {
 		return undefined;
 	}
 
+	/** Fetch a style's sample and persist it for offline Details viewing. */
+	private async cacheSample(
+		id: string,
+		dependent: boolean,
+		opts?: { fresh?: boolean }
+	): Promise<StyleSample | undefined> {
+		const sample = await this.fetchSample(id, dependent, opts);
+		if (sample) {
+			await this.store.set(SAMPLE_PREFIX + id, JSON.stringify(sample));
+		}
+		return sample;
+	}
+
+	/**
+	 * Best-effort: cache samples for every downloaded member of a style's
+	 * (now locally closed) dependency chain. Folder styles are skipped —
+	 * the previews endpoint only knows repository styles.
+	 */
+	private async cacheChainSamples(
+		id: string,
+		opts?: { skip?: string; fresh?: boolean }
+	): Promise<void> {
+		const chain = await this.styles.resolveChain(id, {
+			allowNetwork: false,
+		});
+		if (!chain.ok) return;
+		for (const member of chain.chain) {
+			if (member === opts?.skip) continue;
+			const local = await this.styles.getLocal(member);
+			if (!local || local.source !== "remote-cache") continue;
+			await this.cacheSample(member, local.meta?.dependent ?? false, {
+				fresh: opts?.fresh,
+			});
+		}
+	}
+
 	/**
 	 * Fetch a style by id or URL and return its metadata plus a rendered
 	 * sample for user confirmation. Nothing is cached; pass the preview to
 	 * addStyle(). Throws when the input is empty, unreachable, or not CSL.
 	 */
 	async previewStyle(input: string): Promise<StylePreview> {
-		const { id, url } = this.parseStyleInput(input);
-		if (!id) {
+		const { id: inputId, url } = this.parseStyleInput(input);
+		if (!inputId) {
 			throw new Error("provide a style id or a style URL");
 		}
 		const xml = await this.fetcher.fetchText(url);
 		const meta = extractStyleMeta(xml); // throws on non-CSL payloads
+		// The style's own declared id (info > id) is the authoritative slug
+		// source — the user's input may carry tracking params or odd paths.
+		const selfSlug = meta.selfUri ? slugFromStyleUri(meta.selfUri) : "";
+		const id = /^[\w.-]+$/.test(selfSlug) ? selfSlug : inputId;
 		return {
 			id,
 			sourceUrl: url,
@@ -250,12 +294,22 @@ export class CslRenderService {
 	}
 
 	/**
-	 * Rendered sample for an installed style (Details modal). Best-effort:
+	 * Rendered sample for an installed style (Details modal). Served from
+	 * the persistent cache so it works offline; falls back to a network
+	 * fetch (and caches it) when nothing is stored yet. Best-effort:
 	 * undefined when the previews endpoint has none.
 	 */
 	async styleSample(id: string): Promise<StyleSample | undefined> {
+		const cached = await this.store.get(SAMPLE_PREFIX + id);
+		if (cached !== null) {
+			try {
+				return JSON.parse(cached) as StyleSample;
+			} catch {
+				// corrupt entry — refetch below
+			}
+		}
 		const local = await this.styles.getLocal(id);
-		return this.fetchSample(id, local?.meta?.dependent ?? false);
+		return this.cacheSample(id, local?.meta?.dependent ?? false);
 	}
 
 	/**
@@ -268,8 +322,21 @@ export class CslRenderService {
 		await this.styles.cacheFetched(preview.id, preview.sourceUrl, preview.xml, {
 			explicit: true,
 		});
+		// The preview's sample is already in hand — persist it for offline
+		// Details viewing.
+		if (preview.sample) {
+			await this.store.set(
+				SAMPLE_PREFIX + preview.id,
+				JSON.stringify(preview.sample)
+			);
+		}
 		this.pool.clear(); // may shadow a pooled engine with the same id
-		return this.resolver.availability(preview.id, { allowNetwork: true });
+		const avail = await this.resolver.availability(preview.id, {
+			allowNetwork: true,
+		});
+		// Auto-fetched parents get their samples cached too (best-effort).
+		await this.cacheChainSamples(preview.id, { skip: preview.id });
+		return avail;
 	}
 
 	/**
@@ -292,6 +359,8 @@ export class CslRenderService {
 		const availability = await this.resolver.availability(id, {
 			allowNetwork: true,
 		});
+		// Refresh the cached samples alongside the styles themselves.
+		await this.cacheChainSamples(id, { fresh: true });
 		return { ...result, availability };
 	}
 
@@ -445,6 +514,7 @@ export class CslRenderService {
 		}
 
 		await this.styles.remove(id);
+		await this.store.delete(SAMPLE_PREFIX + id);
 
 		for (const ancestor of ancestors) {
 			const entry = await this.styles.getLocal(ancestor);
@@ -455,6 +525,7 @@ export class CslRenderService {
 			const dependents = await this.styles.dependentsOf(ancestor);
 			if (dependents.length > 0) break; // still referenced
 			await this.styles.remove(ancestor);
+			await this.store.delete(SAMPLE_PREFIX + ancestor);
 		}
 		this.pool.clear();
 	}
@@ -478,6 +549,14 @@ export class CslRenderService {
 			report.failed.push(...chain.failed);
 		}
 		this.pool.clear();
+		// Refresh cached samples for everything the walk touched.
+		for (const id of visited) {
+			const local = await this.styles.getLocal(id);
+			if (!local || local.source !== "remote-cache") continue;
+			await this.cacheSample(id, local.meta?.dependent ?? false, {
+				fresh: true,
+			});
+		}
 		await this.store.set(STYLES_CHECKED_KEY, String(report.checkedAt));
 		return report;
 	}
@@ -569,6 +648,9 @@ export class CslRenderService {
 	async clearCache(): Promise<void> {
 		await this.styles.clearCache();
 		await this.locales.clearCache();
+		for (const key of await this.store.list(SAMPLE_PREFIX)) {
+			await this.store.delete(key);
+		}
 		await this.store.delete(STYLES_CHECKED_KEY);
 		await this.store.delete(LOCALES_CHECKED_KEY);
 		this.pool.clear();

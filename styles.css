@@ -2197,23 +2197,13 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     white-space: nowrap;
 }
 
+/* Standard Obsidian button (default background + hover); only the
+   icon/text layout is ours. */
 .zotflow-csl-textbtn {
     display: inline-flex;
     align-items: center;
     gap: var(--size-4-1);
-    background: none;
-    box-shadow: none;
-    border: none;
-    padding: var(--size-2-1) var(--size-4-2);
-    color: var(--text-muted);
     font-size: var(--font-ui-smaller);
-    cursor: pointer;
-    border-radius: var(--radius-s);
-}
-
-.zotflow-csl-textbtn:hover:not(:disabled) {
-    background-color: var(--background-modifier-hover);
-    color: var(--text-normal);
 }
 
 .zotflow-csl-textbtn svg {
@@ -2386,23 +2376,29 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     color: var(--text-error);
 }
 
+/* Non-interactive icon that fills an action slot (e.g. built-in locale in
+   the delete position) so row right edges stay aligned. */
+.zotflow-csl-slot-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--size-2-2) var(--size-2-3);
+    color: var(--text-faint);
+}
+
+.zotflow-csl-slot-glyph svg {
+    width: var(--icon-s);
+    height: var(--icon-s);
+}
+
+/* Standard Obsidian button with a yellow border as the attention cue. */
 .zotflow-csl-chip-btn {
     display: inline-flex;
     align-items: center;
     gap: var(--size-4-1);
-    background-color: rgba(var(--color-yellow-rgb), 0.12);
-    color: var(--color-yellow);
-    border: 1px solid rgba(var(--color-yellow-rgb), 0.3);
-    box-shadow: none;
-    border-radius: var(--radius-s);
-    padding: var(--size-2-1) var(--size-4-2);
+    border: 1px solid rgba(var(--color-yellow-rgb), 0.5);
     font-size: var(--font-ui-smaller);
     font-weight: var(--font-medium);
-    cursor: pointer;
-}
-
-.zotflow-csl-chip-btn:hover:not(:disabled) {
-    background-color: rgba(var(--color-yellow-rgb), 0.2);
 }
 
 .zotflow-csl-chip-btn svg {
@@ -2468,15 +2464,20 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     height: 13px;
 }
 
+/* Layering matches parent rows: title is primary (normal text color),
+   the mono id is demoted -- monospace reads heavy, so shrink + fade it. */
 .zotflow-csl-alias-title {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--text-normal);
+    font-weight: 500;
 }
 
 .zotflow-csl-alias-id {
     flex-shrink: 0;
     color: var(--text-faint);
+    font-size: var(--font-smallest);
 }
 
 .zotflow-csl-alias-actions {
@@ -2499,6 +2500,15 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
 
 /* -- Modals (Add / Details) -- */
 
+/* Same title treatment as the tag edit modal. */
+.zotflow-csl-modal {
+    & .modal-header {
+        & .modal-title {
+            font-size: var(--font-ui-medium);
+        }
+    }
+}
+
 .zotflow-csl-add-modal .zotflow-csl-modal-card {
     margin: var(--size-4-2) 0;
     padding: var(--size-4-2) var(--size-4-3);
@@ -2507,13 +2517,18 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     font-size: var(--font-ui-small);
 }
 
+/* Card headings sit OUTSIDE the bordered card, per ZotFlow UI. */
 .zotflow-csl-modal-card-heading {
     font-size: var(--font-ui-smaller);
     font-weight: var(--font-semibold);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: var(--size-4-1);
+    margin: var(--size-4-4) 0 var(--size-4-2) var(--size-2-1);
+}
+
+.zotflow-csl-modal-card-heading + .zotflow-csl-modal-card {
+    margin-top: 0;
 }
 
 .zotflow-csl-modal-row {
@@ -2698,7 +2713,14 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     margin-bottom: var(--size-4-1);
 }
 
+/* Footer buttons: hide the empty label half so the control row spans the
+   full modal width -- otherwise a left-anchored button starts mid-modal. */
+.zotflow-csl-modal-buttons .setting-item-info {
+    display: none;
+}
+
 .zotflow-csl-modal-buttons .setting-item-control {
+    width: 100%;
     justify-content: flex-end;
 }
 

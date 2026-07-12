@@ -50,6 +50,7 @@ export class StyleDetailsModal extends Modal {
     onOpen(): void {
         const { contentEl } = this;
         const { entry } = this;
+        this.modalEl.addClass("zotflow-csl-modal");
         contentEl.addClass("zotflow-csl-add-modal");
 
         if (entry.state === "unavailable" && entry.reason) {

@@ -84,6 +84,15 @@ export interface StyleDetailsHandle {
     setSample(sample: StyleSample | undefined): void;
 }
 
+export interface StyleDetailsOptions {
+    /**
+     * Render the alias-of / alias-count relationship notes (default true).
+     * The Add modal disables this: it shows its own download-impact note
+     * for aliases, and repeating the relationship would be noise.
+     */
+    dependencyNotes?: boolean;
+}
+
 /**
  * Shared StyleDetails block: metadata table + dependency relationship +
  * rendered preview. Used by both the Add modal and the Details modal so the
@@ -92,6 +101,7 @@ export interface StyleDetailsHandle {
 export function renderStyleDetails(
     containerEl: HTMLElement,
     meta: StyleDetailsMeta,
+    options?: StyleDetailsOptions,
 ): StyleDetailsHandle {
     /* ---- metadata table ---- */
     const table = containerEl.createDiv("zotflow-csl-details-table");
@@ -134,7 +144,8 @@ export function renderStyleDetails(
     });
 
     /* ---- dependency relationship ---- */
-    if (meta.aliasOf) {
+    const dependencyNotes = options?.dependencyNotes ?? true;
+    if (dependencyNotes && meta.aliasOf) {
         const note = containerEl.createDiv("zotflow-csl-details-note");
         const icon = note.createSpan("zotflow-csl-inline-icon");
         setIcon(icon, "corner-down-right");
@@ -143,21 +154,21 @@ export function renderStyleDetails(
         text.createSpan({ cls: "zotflow-csl-strong", text: meta.aliasOf });
         text.appendText(". Formatting and updates come from the parent style.");
     }
-    if (meta.aliasCount && meta.aliasCount > 0) {
+    if (dependencyNotes && meta.aliasCount && meta.aliasCount > 0) {
         containerEl.createDiv({
             cls: "zotflow-csl-details-note zotflow-csl-details-note--quiet",
             text: `${meta.aliasCount} journal ${meta.aliasCount === 1 ? "alias points" : "aliases point"} to this style.`,
         });
     }
 
-    /* ---- preview ---- */
-    const preview = containerEl.createDiv(
-        "zotflow-csl-modal-card zotflow-csl-modal-preview",
-    );
-    preview.createDiv({
+    /* ---- preview (heading sits outside the border, per ZotFlow UI) ---- */
+    containerEl.createDiv({
         cls: "zotflow-csl-modal-card-heading",
         text: "Preview",
     });
+    const preview = containerEl.createDiv(
+        "zotflow-csl-modal-card zotflow-csl-modal-preview",
+    );
     const body = preview.createDiv("zotflow-csl-preview-body");
 
     const renderSkeleton = (loading: boolean) => {

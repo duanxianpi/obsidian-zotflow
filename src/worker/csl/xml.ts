@@ -35,14 +35,17 @@ function textOf(node: XmlJsonNode | undefined): string | undefined {
 
 /** Extract the style slug from a zotero.org/styles style URI, else return the input. */
 export function slugFromStyleUri(uri: string): string {
-	const m = uri.match(/\/styles\/([^/?#]+)\/?$/);
+	// Query/fragment never belong in a slug (zotero.org pages link styles
+	// with tracking params like "?source=1").
+	const cleaned = uri.split(/[?#]/)[0] as string;
+	const m = cleaned.match(/\/styles\/([^/]+)\/?$/);
 	if (m && m[1]) return m[1];
 	// Not a styles URL — take the last path segment if it looks like a URL.
-	if (/^https?:\/\//.test(uri)) {
-		const seg = uri.replace(/[/?#]+$/, "").split("/").pop();
+	if (/^https?:\/\//.test(cleaned)) {
+		const seg = cleaned.replace(/\/+$/, "").split("/").pop();
 		if (seg) return seg;
 	}
-	return uri;
+	return cleaned;
 }
 
 /**

@@ -29,6 +29,7 @@ export class AddCslStyleModal extends Modal {
 
     onOpen(): void {
         const { contentEl } = this;
+        this.modalEl.addClass("zotflow-csl-modal");
         contentEl.addClass("zotflow-csl-add-modal");
 
         let input = "";
@@ -43,11 +44,11 @@ export class AddCslStyleModal extends Modal {
                         text: "Zotero style repository",
                         href: "https://www.zotero.org/styles/",
                     });
-                    f.appendText(" — e.g. nature or apa.");
+                    f.appendText(" — e.g. ieee or apa.");
                 }),
             )
             .addText((text) => {
-                text.setPlaceholder("Example: nature").onChange((v) => {
+                text.setPlaceholder("Example: ieee").onChange((v) => {
                     input = v;
                 });
                 text.inputEl.addEventListener("keydown", (e) => {
@@ -134,16 +135,21 @@ export class AddCslStyleModal extends Modal {
             });
         }
 
-        const details = renderStyleDetails(this.resultEl, {
-            id: p.id,
-            title: p.title,
-            citationFormat: p.citationFormat,
-            hasBibliography: p.hasBibliography,
-            defaultLocale: p.defaultLocale,
-            source: "remote",
-            sourceUrl: p.sourceUrl,
-            aliasOf: p.dependent ? p.parent : undefined,
-        });
+        const details = renderStyleDetails(
+            this.resultEl,
+            {
+                id: p.id,
+                title: p.title,
+                citationFormat: p.citationFormat,
+                hasBibliography: p.hasBibliography,
+                defaultLocale: p.defaultLocale,
+                source: "remote",
+                sourceUrl: p.sourceUrl,
+                aliasOf: p.dependent ? p.parent : undefined,
+            },
+            // The impact callout above already covers the relationship.
+            { dependencyNotes: false },
+        );
         details.setSample(p.sample);
     }
 
@@ -221,6 +227,7 @@ export class AddCslLocaleModal extends Modal {
 
     onOpen(): void {
         const { contentEl } = this;
+        this.modalEl.addClass("zotflow-csl-modal");
         contentEl.addClass("zotflow-csl-add-modal");
 
         let input = "";
@@ -231,15 +238,13 @@ export class AddCslLocaleModal extends Modal {
             .setDesc(
                 createFragment((f) => {
                     f.appendText(
-                        "Enter a BCP-47 tag such as de-DE, zh-CN or fr-FR. Available tags are listed in the ",
+                        "Enter a BCP-47 tag such as zh-CN. Available tags are listed in the ",
                     );
                     f.createEl("a", {
-                        text: "Zotero locales repository",
+                        text: "locales repository",
                         href: "https://github.com/citation-style-language/locales",
                     });
-                    f.appendText(
-                        " (files are fetched from raw.githubusercontent.com). The default locale of a style is downloaded automatically when the style is added.",
-                    );
+                    f.appendText(".");
                 }),
             )
             .addText((text) => {
