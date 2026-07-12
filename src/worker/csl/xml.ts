@@ -60,10 +60,17 @@ export function extractStyleMeta(xml: string): StyleMeta {
 	const selfUri = info ? textOf(childElements(info, "id")[0]) : undefined;
 
 	let parentUri: string | undefined;
+	let citationFormat: string | undefined;
 	if (info) {
 		for (const link of childElements(info, "link")) {
 			if (link.attrs?.["rel"] === "independent-parent" && link.attrs["href"]) {
 				parentUri = link.attrs["href"];
+				break;
+			}
+		}
+		for (const category of childElements(info, "category")) {
+			if (category.attrs?.["citation-format"]) {
+				citationFormat = category.attrs["citation-format"];
 				break;
 			}
 		}
@@ -84,5 +91,12 @@ export function extractStyleMeta(xml: string): StyleMeta {
 		dependent,
 		parent: dependent && parentUri ? slugFromStyleUri(parentUri) : undefined,
 		defaultLocale: root.attrs?.["default-locale"] || undefined,
+		citationFormat,
+		// <bibliography> is optional by spec: note-only styles omit it on
+		// purpose. Checked directly — never inferred from citation-format.
+		// Meaningless for dependent styles (inherited from the parent).
+		hasBibliography: dependent
+			? undefined
+			: childElements(root, "bibliography").length > 0,
 	};
 }

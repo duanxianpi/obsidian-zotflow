@@ -70,6 +70,19 @@ export interface StyleInfo {
 	parent?: string;
 	/** default-locale declared by the style (or its dependent override), if any. */
 	defaultLocale?: string;
+	/** citation-format category (numeric/author-date/note/...), own declaration. */
+	citationFormat?: string;
+	/**
+	 * Whether the style declares a <bibliography>. Undefined for dependent
+	 * styles (inherited from the parent) and for unparsable styles.
+	 */
+	hasBibliography?: boolean;
+	/**
+	 * True when the user installed this style directly; false when it was
+	 * pulled in as a dependency (an alias's parent). Ref-counted cleanup on
+	 * removal only prunes implicit styles. Remote-cache styles only.
+	 */
+	explicit?: boolean;
 	/** Download provenance (remote-cache styles only). */
 	remote?: RemoteMeta;
 	availability: Availability;
@@ -96,6 +109,10 @@ export interface StylePreview {
 	/** Slug of the independent parent (dependent styles only). */
 	parent?: string;
 	defaultLocale?: string;
+	/** citation-format category (numeric/author-date/note/...), own declaration. */
+	citationFormat?: string;
+	/** See StyleInfo.hasBibliography; undefined for dependent styles. */
+	hasBibliography?: boolean;
 	/** True when a style with this id is already installed locally. */
 	alreadyInstalled: boolean;
 	xml: string;
@@ -134,4 +151,17 @@ export interface StyleMeta {
 	parent?: string;
 	/** default-locale attribute on <style>, if any. */
 	defaultLocale?: string;
+	/** citation-format from info > category, if declared. */
+	citationFormat?: string;
+	/** Presence of <bibliography>; undefined for dependent styles. */
+	hasBibliography?: boolean;
+}
+
+/** Aggregate result of updating every downloaded style / locale. */
+export interface UpdateAllReport {
+	updated: string[];
+	unchanged: string[];
+	failed: { id: string; reason: string }[];
+	/** Epoch ms of this check; persisted and reported by getUpdateStatus(). */
+	checkedAt: number;
 }

@@ -2156,18 +2156,72 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     max-height: 40%;
 }
 
+/* -- Section header: label + count ... checked / update all / add -- */
+
 .zotflow-csl-section-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: var(--size-4-2);
+    margin-bottom: var(--size-4-1);
+    flex-shrink: 0;
+}
+
+.zotflow-csl-section-title {
     font-size: var(--font-ui-small);
     font-weight: var(--font-semibold);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: var(--size-4-1);
-    flex-shrink: 0;
 }
+
+.zotflow-csl-count {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-medium);
+    padding: 0 var(--size-4-2);
+    border-radius: 999px;
+    line-height: 1.6;
+}
+
+.zotflow-csl-section-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-1);
+}
+
+.zotflow-csl-checked {
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.zotflow-csl-textbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-1);
+    background: none;
+    box-shadow: none;
+    border: none;
+    padding: var(--size-2-1) var(--size-4-2);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+    border-radius: var(--radius-s);
+}
+
+.zotflow-csl-textbtn:hover:not(:disabled) {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.zotflow-csl-textbtn svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* -- Lists & rows -- */
 
 .zotflow-csl-list {
     border: 1px solid var(--background-modifier-border);
@@ -2189,20 +2243,75 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     font-size: var(--font-ui-small);
 }
 
+.zotflow-csl-group {
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.zotflow-csl-group:last-child {
+    border-bottom: none;
+}
+
+/* Consistent grid: [status] info ... [source][actions] */
 .zotflow-csl-row {
     display: flex;
     align-items: center;
     gap: var(--size-4-2);
-    padding: var(--size-4-2) 0;
-    border-bottom: 1px solid var(--background-modifier-border);
+    padding: var(--size-4-2) var(--size-4-1);
+    border-radius: var(--radius-s);
+    cursor: pointer;
 }
 
-.zotflow-csl-row:last-child {
-    border-bottom: none;
+.zotflow-csl-row:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-csl-row--broken {
+    background-color: rgba(var(--color-red-rgb), 0.05);
+}
+
+.zotflow-csl-row--locale {
+    cursor: default;
+}
+
+.zotflow-csl-row-status {
+    display: flex;
+    width: 14px;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* Quiet status: happy path is a pale dot; problems escalate. */
+.zotflow-csl-dot {
+    border-radius: 999px;
+}
+
+.zotflow-csl-dot--ready {
+    width: 6px;
+    height: 6px;
+    background-color: rgba(var(--color-green-rgb), 0.7);
+}
+
+.zotflow-csl-dot--resolvable {
+    width: 8px;
+    height: 8px;
+    background-color: var(--color-yellow);
+}
+
+.zotflow-csl-status-icon svg {
+    width: 14px;
+    height: 14px;
+    color: var(--text-error);
 }
 
 .zotflow-csl-row-info {
     flex: 1;
+    min-width: 0;
+}
+
+.zotflow-csl-row-title-line {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
     min-width: 0;
 }
 
@@ -2214,7 +2323,23 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     white-space: nowrap;
 }
 
+.zotflow-csl-row-subtle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-1);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.zotflow-csl-row-subtle svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* Layered metadata: title / id + facts / progressively fainter. */
 .zotflow-csl-row-meta {
+    margin-top: 1px;
     font-size: var(--font-ui-smaller);
     color: var(--text-muted);
     overflow: hidden;
@@ -2222,27 +2347,149 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     white-space: nowrap;
 }
 
-.zotflow-csl-badge {
-    flex-shrink: 0;
-    font-size: var(--font-ui-smaller);
-    padding: 2px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
+.zotflow-csl-meta-sep {
+    color: var(--text-faint);
+    margin: 0 var(--size-4-1);
 }
 
-.zotflow-csl-badge-ready {
-    background-color: rgba(var(--color-green-rgb), 0.18);
-    color: var(--color-green);
-}
-
-.zotflow-csl-badge-resolvable {
-    background-color: rgba(var(--color-yellow-rgb), 0.18);
+.zotflow-csl-meta-warn {
     color: var(--color-yellow);
 }
 
-.zotflow-csl-badge-unavailable {
-    background-color: rgba(var(--color-red-rgb), 0.15);
-    color: var(--color-red);
+.zotflow-csl-meta-error {
+    color: var(--text-error);
+}
+
+.zotflow-csl-mono {
+    font-family: var(--font-monospace);
+    font-size: 0.92em;
+}
+
+.zotflow-csl-row-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--size-2-1);
+    flex-shrink: 0;
+}
+
+.zotflow-csl-source-glyph {
+    color: var(--text-faint);
+    padding: 0 var(--size-2-1);
+}
+
+.zotflow-csl-source-glyph svg {
+    width: 14px;
+    height: 14px;
+}
+
+.zotflow-csl-danger:hover {
+    color: var(--text-error);
+}
+
+.zotflow-csl-chip-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-1);
+    background-color: rgba(var(--color-yellow-rgb), 0.12);
+    color: var(--color-yellow);
+    border: 1px solid rgba(var(--color-yellow-rgb), 0.3);
+    box-shadow: none;
+    border-radius: var(--radius-s);
+    padding: var(--size-2-1) var(--size-4-2);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+}
+
+.zotflow-csl-chip-btn:hover:not(:disabled) {
+    background-color: rgba(var(--color-yellow-rgb), 0.2);
+}
+
+.zotflow-csl-chip-btn svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* -- Neutral capability badges (Type / Output) -- */
+
+.zotflow-csl-fbadge {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--background-modifier-hover);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    letter-spacing: 0.02em;
+    padding: 0 var(--size-4-1);
+    border-radius: var(--radius-s);
+    line-height: 1.5;
+    white-space: nowrap;
+}
+
+.zotflow-csl-fbadge--pending {
+    color: var(--text-faint);
+    background: none;
+    border-style: dashed;
+}
+
+/* -- Aliases collapse under their parent -- */
+
+.zotflow-csl-alias-list {
+    margin-left: var(--size-4-6);
+    padding-left: var(--size-4-3);
+    border-left: 1px solid var(--background-modifier-border);
+    margin-bottom: var(--size-4-1);
+}
+
+.zotflow-csl-alias-row {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    padding: var(--size-2-1) var(--size-4-1);
+    border-radius: var(--radius-s);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+}
+
+.zotflow-csl-alias-row:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-csl-alias-arrow {
+    color: var(--text-faint);
+    flex-shrink: 0;
+}
+
+.zotflow-csl-alias-arrow svg {
+    width: 13px;
+    height: 13px;
+}
+
+.zotflow-csl-alias-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.zotflow-csl-alias-id {
+    flex-shrink: 0;
+    color: var(--text-faint);
+}
+
+.zotflow-csl-alias-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+
+.zotflow-csl-footnote {
+    margin: var(--size-4-1) var(--size-4-1) 0;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-faint);
+    flex-shrink: 0;
 }
 
 .zotflow-csl-muted {
@@ -2250,7 +2497,7 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     font-size: var(--font-ui-smaller);
 }
 
-/* ── Add style / locale modals ── */
+/* -- Modals (Add / Details) -- */
 
 .zotflow-csl-add-modal .zotflow-csl-modal-card {
     margin: var(--size-4-2) 0;
@@ -2277,18 +2524,116 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     overflow-wrap: anywhere;
 }
 
-.zotflow-csl-modal-label {
+.zotflow-csl-add-idle {
+    margin: var(--size-4-2) 0;
+    padding: var(--size-4-6) var(--size-4-3);
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    text-align: center;
+    color: var(--text-faint);
+    font-size: var(--font-ui-small);
+}
+
+/* Details table: striped label/value rows shared by Add + Details. */
+.zotflow-csl-details-table {
+    margin: var(--size-4-2) 0;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    overflow: hidden;
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-csl-details-row {
+    display: flex;
+    gap: var(--size-4-3);
+    padding: var(--size-2-1) var(--size-4-3);
+    overflow-wrap: anywhere;
+}
+
+.zotflow-csl-details-row:nth-child(even) {
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-csl-details-label {
     flex-shrink: 0;
     width: 7.5em;
     color: var(--text-muted);
 }
 
-.zotflow-csl-modal-value {
+.zotflow-csl-details-value {
     flex: 1;
     min-width: 0;
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--size-4-1);
+    flex-wrap: wrap;
 }
 
-/* Skeleton bars keep the modal footprint before/while fetching. */
+.zotflow-csl-details-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-2-1);
+    overflow-wrap: anywhere;
+}
+
+.zotflow-csl-details-note {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--size-4-2);
+    margin: var(--size-4-2) 0;
+    padding: var(--size-4-2) var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background-color: var(--background-secondary);
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-csl-details-note--quiet {
+    background: none;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-csl-strong {
+    color: var(--text-normal);
+    font-weight: var(--font-medium);
+}
+
+.zotflow-csl-inline-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: currentColor;
+}
+
+.zotflow-csl-inline-icon svg {
+    width: 13px;
+    height: 13px;
+}
+
+.zotflow-csl-callout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--size-4-2);
+    margin: var(--size-4-2) 0;
+    padding: var(--size-4-2) var(--size-4-3);
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-csl-callout--warning {
+    border: 1px solid rgba(var(--color-yellow-rgb), 0.3);
+    background-color: rgba(var(--color-yellow-rgb), 0.07);
+    color: var(--color-yellow);
+}
+
+.zotflow-csl-callout--error {
+    border: 1px solid rgba(var(--color-red-rgb), 0.3);
+    background-color: rgba(var(--color-red-rgb), 0.07);
+    color: var(--text-error);
+}
+
+/* Skeleton bars keep the modal footprint while fetching. */
 .zotflow-csl-skeleton {
     display: inline-block;
     height: 0.85em;
@@ -2317,7 +2662,7 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     width: 80%;
 }
 
-.zotflow-csl-add-modal.is-loading .zotflow-csl-skeleton {
+.is-loading .zotflow-csl-skeleton {
     animation: zotflow-csl-skeleton-pulse 1.2s ease-in-out infinite;
 }
 
@@ -2331,20 +2676,10 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     }
 }
 
-.zotflow-csl-modal-notice:empty {
-    display: none;
-}
-
-.zotflow-csl-modal-warning {
-    margin: var(--size-4-1) 0;
-    color: var(--text-warning);
-    font-size: var(--font-ui-small);
-}
-
-.zotflow-csl-modal-error {
-    margin: var(--size-4-1) 0;
-    color: var(--text-error);
-    font-size: var(--font-ui-small);
+.zotflow-csl-modal-muted {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    margin-top: var(--size-4-1);
 }
 
 .zotflow-csl-modal-citation {
@@ -2367,11 +2702,20 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     justify-content: flex-end;
 }
 
-/* ── Responsive (mirrors the Activity Center breakpoints) ── */
+.zotflow-csl-modal-buttons .zotflow-csl-btn-left {
+    margin-right: auto;
+}
+
+/* -- Responsive (mirrors the Activity Center breakpoints) -- */
 
 @media (max-width: 600px) {
     .zotflow-csl-section--locales {
         max-height: 45%;
+    }
+
+    /* Header: drop the quiet "Checked" text first. */
+    .zotflow-csl-checked {
+        display: none;
     }
 
     /* Rows wrap: info takes the full first line, actions drop below. */
@@ -2381,10 +2725,27 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     }
 
     .zotflow-csl-row-info {
-        flex: 1 1 100%;
+        flex: 1 1 calc(100% - 22px);
     }
 
-    .zotflow-csl-modal-label {
+    .zotflow-csl-row-actions {
+        margin-left: auto;
+    }
+
+    .zotflow-csl-row-title-line {
+        flex-wrap: wrap;
+    }
+
+    .zotflow-csl-alias-list {
+        margin-left: var(--size-4-3);
+        padding-left: var(--size-4-2);
+    }
+
+    .zotflow-csl-alias-id {
+        display: none;
+    }
+
+    .zotflow-csl-details-label {
         width: 6em;
     }
 

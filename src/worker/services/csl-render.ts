@@ -13,7 +13,10 @@ import type {
     RenderOptions,
     StyleInfo,
     StylePreview,
+    StyleSample,
     StyleUpdateReport,
+    UpdateAllReport,
+    UpdateStatus,
 } from "worker/csl";
 import type { LocaleInfo } from "worker/csl";
 import type { ZotFlowSettings } from "settings/types";
@@ -172,6 +175,26 @@ export class CslRenderWorkerService {
     /** Refetch a downloaded style and its whole dependency chain. */
     updateStyle(id: string): Promise<StyleUpdateReport> {
         return this.core.updateStyle(id);
+    }
+
+    /** Refetch every downloaded style once (shared parents deduplicated). */
+    updateAllStyles(): Promise<UpdateAllReport> {
+        return this.core.updateAllStyles();
+    }
+
+    /** Refetch every downloaded locale. */
+    updateAllLocales(): Promise<UpdateAllReport> {
+        return this.core.updateAllLocales();
+    }
+
+    /** When update-all last ran for styles / locales. */
+    getUpdateStatus(): Promise<UpdateStatus> {
+        return this.core.getUpdateStatus();
+    }
+
+    /** Rendered sample for an installed style (Details modal), best-effort. */
+    styleSample(id: string): Promise<StyleSample | undefined> {
+        return this.core.styleSample(id);
     }
 
     /** Register a style from the vault styles folder. */

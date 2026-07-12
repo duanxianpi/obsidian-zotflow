@@ -1,64 +1,56 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { Platform } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { ObsidianIcon } from "ui/ObsidianIcon";
 import { AddCslLocaleModal, AddCslStyleModal } from "ui/modals/csl-add-modal";
+import { StyleDetailsModal } from "ui/modals/csl-details-modal";
+import {
+    effectiveCaps,
+    LocaleRow,
+    rowState,
+    SectionHeader,
+    StyleRowGroup,
+    unavailableReason,
+} from "ui/activity-center/CslRows";
 
-import type {
-    Availability,
-    LocaleInfo,
-    StyleInfo,
-    StyleUpdateReport,
-} from "worker/csl";
+import type { LocaleInfo, StyleInfo, UpdateAllReport } from "worker/csl";
+import type { StyleGroup } from "ui/activity-center/CslRows";
+import type { StyleDetailsMeta } from "ui/modals/csl-style-details";
 
-type BadgeKind = "ready" | "resolvable" | "unavailable";
-
-function badgeFor(a: Availability): { kind: BadgeKind; label: string } {
-    switch (a.status) {
-        case "ready":
-            return { kind: "ready", label: "Ready" };
-        case "resolvable":
-            return { kind: "resolvable", label: "Resolvable" };
-        case "unresolved-parent":
-            return { kind: "unavailable", label: `Missing parent: ${a.parent}` };
-        case "unresolved-locale":
-            return { kind: "unavailable", label: `Missing locale: ${a.locale}` };
-        case "missing":
-            return { kind: "unavailable", label: "Missing" };
-        case "invalid":
-            return { kind: "unavailable", label: "Invalid" };
+/** Parent-first grouping: installed aliases collapse under their parent. */
+function groupStyles(styles: StyleInfo[]): {
+    groups: StyleGroup[];
+    byId: Map<string, StyleInfo>;
+} {
+    const byId = new Map(styles.map((s) => [s.id, s]));
+    const aliasesByParent = new Map<string, StyleInfo[]>();
+    const roots: StyleInfo[] = [];
+    for (const s of styles) {
+        if (s.dependent && s.parent && byId.has(s.parent)) {
+            const list = aliasesByParent.get(s.parent) ?? [];
+            list.push(s);
+            aliasesByParent.set(s.parent, list);
+        } else {
+            roots.push(s);
+        }
     }
+    return {
+        groups: roots.map((root) => ({
+            root,
+            aliases: aliasesByParent.get(root.id) ?? [],
+        })),
+        byId,
+    };
 }
 
-function availabilityTooltip(a: Availability): string | undefined {
-    return a.status === "invalid" ? a.reason : undefined;
-}
-
-const Badge: React.FC<{ availability: Availability }> = ({ availability }) => {
-    const badge = badgeFor(availability);
-    return (
-        <span
-            className={`zotflow-csl-badge zotflow-csl-badge-${badge.kind}`}
-            title={availabilityTooltip(availability)}
-        >
-            {badge.label}
-        </span>
-    );
-};
-
-function fmtDate(ms: number): string {
-    return new Date(ms).toLocaleDateString();
-}
-
-function updateSummary(id: string, report: StyleUpdateReport): string {
+function updateSummary(report: UpdateAllReport): string {
     if (report.failed.length > 0) {
-        return `"${id}": update incomplete — failed: ${report.failed
+        return `Update incomplete — failed: ${report.failed
             .map((f) => f.id)
             .join(", ")}`;
     }
-    if (report.updated.length === 0) {
-        return `"${id}" is already up to date`;
-    }
+    if (report.updated.length === 0) return "Everything is up to date";
     return `Updated ${report.updated.join(", ")}`;
 }
 
@@ -66,17 +58,30 @@ function updateSummary(id: string, report: StyleUpdateReport): string {
 export const CslStylesView: React.FC = () => {
     const [styles, setStyles] = useState<StyleInfo[]>([]);
     const [locales, setLocales] = useState<LocaleInfo[]>([]);
+    const [checked, setChecked] = useState<{
+        styles?: number;
+        locales?: number;
+    }>({});
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
+    // Update failures are session-scoped row markers, not persisted state.
+    const [updateFailures, setUpdateFailures] = useState<Set<string>>(
+        new Set(),
+    );
 
     const refresh = useCallback(async () => {
         try {
-            const [styleList, localeList] = await Promise.all([
+            const [styleList, localeList, status] = await Promise.all([
                 workerBridge.cslRender.listStyles(),
                 workerBridge.cslRender.listLocales(),
+                workerBridge.cslRender.getUpdateStatus(),
             ]);
             setStyles(styleList);
             setLocales(localeList);
+            setChecked({
+                styles: status.stylesCheckedAt,
+                locales: status.localesCheckedAt,
+            });
         } catch (e) {
             services.logService.error(
                 "Failed to load CSL styles/locales",
@@ -92,18 +97,123 @@ export const CslStylesView: React.FC = () => {
         void refresh();
     }, [refresh]);
 
-    const openAddStyle = useCallback(() => {
-        new AddCslStyleModal(services.app, () => void refresh()).open();
-    }, [refresh]);
+    const markFailures = useCallback(
+        (failed: { id: string }[], succeeded: string[]) => {
+            setUpdateFailures((prev) => {
+                const next = new Set(prev);
+                for (const id of succeeded) next.delete(id);
+                for (const f of failed) next.add(f.id);
+                return next;
+            });
+        },
+        [],
+    );
 
-    const openAddLocale = useCallback(() => {
-        new AddCslLocaleModal(services.app, () => void refresh()).open();
-    }, [refresh]);
-
-    const handleResolveDeps = useCallback(
-        async (id: string) => {
+    const run = useCallback(
+        async (task: () => Promise<void>) => {
             setBusy(true);
             try {
+                await task();
+            } finally {
+                setBusy(false);
+                await refresh();
+            }
+        },
+        [refresh],
+    );
+
+    /* ------------------------- style handlers ---------------------- */
+
+    const handleUpdateStyle = useCallback(
+        (id: string) =>
+            void run(async () => {
+                try {
+                    const report =
+                        await workerBridge.cslRender.updateStyle(id);
+                    markFailures(report.failed, [
+                        ...report.updated,
+                        ...report.unchanged,
+                    ]);
+                    services.notificationService.notify(
+                        report.failed.length > 0 ? "warning" : "success",
+                        report.failed.length > 0
+                            ? `"${id}": update incomplete`
+                            : report.updated.length > 0
+                              ? `Updated ${report.updated.join(", ")}`
+                              : `"${id}" is already up to date`,
+                    );
+                } catch (e) {
+                    services.logService.error(
+                        `Failed to update style ${id}`,
+                        "CslStylesView",
+                        e,
+                    );
+                    markFailures([{ id }], []);
+                    services.notificationService.notify(
+                        "error",
+                        `Failed to update "${id}".`,
+                    );
+                }
+            }),
+        [markFailures, run],
+    );
+
+    const handleUpdateAllStyles = useCallback(
+        () =>
+            void run(async () => {
+                try {
+                    const report =
+                        await workerBridge.cslRender.updateAllStyles();
+                    markFailures(report.failed, [
+                        ...report.updated,
+                        ...report.unchanged,
+                    ]);
+                    services.notificationService.notify(
+                        report.failed.length > 0 ? "warning" : "success",
+                        updateSummary(report),
+                    );
+                } catch (e) {
+                    services.logService.error(
+                        "Failed to update styles",
+                        "CslStylesView",
+                        e,
+                    );
+                    services.notificationService.notify(
+                        "error",
+                        "Style update check failed.",
+                    );
+                }
+            }),
+        [markFailures, run],
+    );
+
+    const handleRemoveStyle = useCallback(
+        (style: StyleInfo) =>
+            void run(async () => {
+                try {
+                    await workerBridge.cslRender.removeStyle(style.id);
+                    services.notificationService.notify(
+                        "success",
+                        `Removed "${style.id}"`,
+                    );
+                } catch (e) {
+                    services.logService.error(
+                        `Failed to remove style ${style.id}`,
+                        "CslStylesView",
+                        e,
+                    );
+                    services.notificationService.notify(
+                        "error",
+                        `Could not remove "${style.id}".`,
+                    );
+                }
+            }),
+        [run],
+    );
+
+    const handleDownloadParent = useCallback(
+        (id: string) =>
+            void run(async () => {
                 const avail = await workerBridge.cslRender.resolveDeps(id);
                 services.notificationService.notify(
                     avail.status === "ready" ? "success" : "warning",
@@ -111,126 +221,170 @@ export const CslStylesView: React.FC = () => {
                         ? `"${id}" is ready`
                         : `"${id}" still has unresolved dependencies`,
                 );
-                await refresh();
-            } finally {
-                setBusy(false);
-            }
-        },
-        [refresh],
+            }),
+        [run],
     );
 
-    const handleUpdateStyle = useCallback(
-        async (id: string) => {
-            setBusy(true);
-            try {
-                const report = await workerBridge.cslRender.updateStyle(id);
-                services.notificationService.notify(
-                    report.failed.length > 0 ? "warning" : "success",
-                    updateSummary(id, report),
-                );
-                await refresh();
-            } catch (e) {
-                services.logService.error(
-                    `Failed to update style ${id}`,
-                    "CslStylesView",
-                    e,
-                );
-                services.notificationService.notify(
-                    "error",
-                    `Failed to update "${id}".`,
-                );
-            } finally {
-                setBusy(false);
-            }
+    const handleReveal = useCallback((style: StyleInfo) => {
+        if (!Platform.isDesktopApp) {
+            services.notificationService.notify(
+                "info",
+                "Revealing files is available on desktop only.",
+            );
+            return;
+        }
+        const folder = services.settings.cslStylesFolder;
+        services.app.showInFolder(
+            folder ? `${folder}/${style.id}.csl` : `${style.id}.csl`,
+        );
+    }, []);
+
+    const openDetails = useCallback(
+        (style: StyleInfo, group: StyleGroup, byId: Map<string, StyleInfo>) => {
+            const isAlias =
+                !!style.dependent &&
+                !!style.parent &&
+                byId.has(style.parent) &&
+                style.id !== group.root.id;
+            const caps = effectiveCaps(style, byId);
+            const parent = style.parent ? byId.get(style.parent) : undefined;
+            const isFolder = style.source === "folder";
+            const folder = services.settings.cslStylesFolder;
+            const meta: StyleDetailsMeta = {
+                id: style.id,
+                title: style.title,
+                citationFormat: caps.format,
+                formatInherited: caps.inherited,
+                hasBibliography: caps.hasBib,
+                defaultLocale: style.defaultLocale ?? parent?.defaultLocale,
+                source: isFolder ? "folder" : "remote",
+                sourceUrl: style.remote?.sourceUrl,
+                filePath: isFolder
+                    ? `${folder ? `${folder}/` : ""}${style.id}.csl`
+                    : undefined,
+                aliasOf: style.dependent ? style.parent : undefined,
+                aliasCount: isAlias ? undefined : group.aliases.length,
+            };
+            const state = rowState(style.availability);
+            new StyleDetailsModal(
+                services.app,
+                {
+                    meta,
+                    state,
+                    reason: unavailableReason(style.availability),
+                    parentNeeded:
+                        state === "resolvable" ? style.parent : undefined,
+                    isAlias,
+                    updateFailed: updateFailures.has(style.id),
+                },
+                {
+                    onUpdate: isFolder
+                        ? undefined
+                        : () => handleUpdateStyle(style.id),
+                    onDownloadParent: () => handleDownloadParent(style.id),
+                    onRemove: isFolder
+                        ? undefined
+                        : () => handleRemoveStyle(style),
+                    onReveal: isFolder ? () => handleReveal(style) : undefined,
+                },
+            ).open();
         },
-        [refresh],
+        [
+            handleDownloadParent,
+            handleRemoveStyle,
+            handleReveal,
+            handleUpdateStyle,
+            updateFailures,
+        ],
     );
 
-    const handleRemoveStyle = useCallback(
-        async (style: StyleInfo) => {
-            setBusy(true);
-            try {
-                await workerBridge.cslRender.removeStyle(style.id);
-                services.notificationService.notify(
-                    "success",
-                    `Removed style "${style.id}"`,
-                );
-                await refresh();
-            } catch (e) {
-                services.logService.error(
-                    `Failed to remove style ${style.id}`,
-                    "CslStylesView",
-                    e,
-                );
-                services.notificationService.notify(
-                    "error",
-                    `Could not remove "${style.id}".`,
-                );
-            } finally {
-                setBusy(false);
-            }
-        },
-        [refresh],
-    );
+    /* ------------------------ locale handlers ---------------------- */
 
     const handleUpdateLocale = useCallback(
-        async (tag: string) => {
-            setBusy(true);
-            try {
-                const { updated } =
-                    await workerBridge.cslRender.updateLocale(tag);
-                services.notificationService.notify(
-                    "success",
-                    updated
-                        ? `Locale "${tag}" updated`
-                        : `Locale "${tag}" is already up to date`,
-                );
-                await refresh();
-            } catch (e) {
-                services.logService.error(
-                    `Failed to update locale ${tag}`,
-                    "CslStylesView",
-                    e,
-                );
-                services.notificationService.notify(
-                    "error",
-                    `Failed to update locale "${tag}".`,
-                );
-            } finally {
-                setBusy(false);
-            }
-        },
-        [refresh],
+        (tag: string) =>
+            void run(async () => {
+                try {
+                    const { updated } =
+                        await workerBridge.cslRender.updateLocale(tag);
+                    services.notificationService.notify(
+                        "success",
+                        updated
+                            ? `Locale "${tag}" updated`
+                            : `Locale "${tag}" is already up to date`,
+                    );
+                } catch (e) {
+                    services.logService.error(
+                        `Failed to update locale ${tag}`,
+                        "CslStylesView",
+                        e,
+                    );
+                    services.notificationService.notify(
+                        "error",
+                        `Failed to update locale "${tag}".`,
+                    );
+                }
+            }),
+        [run],
+    );
+
+    const handleUpdateAllLocales = useCallback(
+        () =>
+            void run(async () => {
+                try {
+                    const report =
+                        await workerBridge.cslRender.updateAllLocales();
+                    services.notificationService.notify(
+                        report.failed.length > 0 ? "warning" : "success",
+                        updateSummary(report),
+                    );
+                } catch (e) {
+                    services.logService.error(
+                        "Failed to update locales",
+                        "CslStylesView",
+                        e,
+                    );
+                    services.notificationService.notify(
+                        "error",
+                        "Locale update check failed.",
+                    );
+                }
+            }),
+        [run],
     );
 
     const handleRemoveLocale = useCallback(
-        async (tag: string) => {
-            setBusy(true);
-            try {
+        (tag: string) =>
+            void run(async () => {
                 await workerBridge.cslRender.removeLocale(tag);
-                await refresh();
-            } finally {
-                setBusy(false);
-            }
-        },
-        [refresh],
+            }),
+        [run],
     );
+
+    /* ----------------------------- render -------------------------- */
+
+    const { groups, byId } = groupStyles(styles);
+    const remoteLocales = locales.filter((l) => l.source === "remote-cache");
 
     return (
         <div className="zotflow-csl-view">
-            {/* ── Styles ── */}
             <div className="zotflow-csl-section zotflow-csl-section--styles">
-                <div className="zotflow-csl-section-header">
-                    <span>Styles</span>
-                    <button
-                        className="clickable-icon"
-                        aria-label="Add style"
-                        onClick={openAddStyle}
-                    >
-                        <ObsidianIcon icon="plus" />
-                    </button>
-                </div>
-
+                <SectionHeader
+                    label="Styles"
+                    count={styles.length}
+                    checkedAt={checked.styles}
+                    busy={busy}
+                    onUpdateAll={
+                        styles.some((s) => s.source === "remote-cache")
+                            ? handleUpdateAllStyles
+                            : undefined
+                    }
+                    onAdd={() =>
+                        new AddCslStyleModal(
+                            services.app,
+                            () => void refresh(),
+                        ).open()
+                    }
+                />
                 <div className="zotflow-csl-list">
                     {loading && (
                         <div className="zotflow-csl-empty">
@@ -250,142 +404,59 @@ export const CslStylesView: React.FC = () => {
                             </span>
                         </div>
                     )}
-                    {styles.map((style) => (
-                    <div className="zotflow-csl-row" key={style.id}>
-                        <div className="zotflow-csl-row-info">
-                            <div className="zotflow-csl-row-title">
-                                {style.title ?? style.id}
-                            </div>
-                            <div
-                                className="zotflow-csl-row-meta"
-                                title={style.remote?.sourceUrl}
-                            >
-                                {[
-                                    style.id,
-                                    style.source,
-                                    style.dependent && style.parent
-                                        ? `parent: ${style.parent}`
-                                        : null,
-                                    style.remote
-                                        ? `fetched ${fmtDate(style.remote.fetchedAt)}`
-                                        : null,
-                                ]
-                                    .filter(Boolean)
-                                    .join(" · ")}
-                            </div>
-                        </div>
-                        <Badge availability={style.availability} />
-                        {style.availability.status === "resolvable" && (
-                            <button
-                                disabled={busy}
-                                onClick={() => void handleResolveDeps(style.id)}
-                            >
-                                Download dependencies
-                            </button>
-                        )}
-                        {style.source === "remote-cache" && (
-                            <button
-                                className="clickable-icon"
-                                aria-label={`Update ${style.id} and its dependencies`}
-                                disabled={busy}
-                                onClick={() => void handleUpdateStyle(style.id)}
-                            >
-                                <ObsidianIcon icon="refresh-cw" />
-                            </button>
-                        )}
-                        {style.source === "folder" ? (
-                            <span
-                                className="zotflow-csl-muted"
-                                title="Folder styles are files in your vault — delete the file to remove"
-                            >
-                                folder
-                            </span>
-                        ) : (
-                            <button
-                                className="clickable-icon"
-                                aria-label={`Remove ${style.id}`}
-                                disabled={busy}
-                                onClick={() => void handleRemoveStyle(style)}
-                            >
-                                <ObsidianIcon icon="trash-2" />
-                            </button>
-                        )}
-                    </div>
+                    {groups.map((group) => (
+                        <StyleRowGroup
+                            key={group.root.id}
+                            group={group}
+                            byId={byId}
+                            busy={busy}
+                            updateFailed={updateFailures.has(group.root.id)}
+                            handlers={{
+                                onOpen: (style, g) =>
+                                    openDetails(style, g, byId),
+                                onUpdate: handleUpdateStyle,
+                                onRemove: handleRemoveStyle,
+                                onDownloadParent: handleDownloadParent,
+                                onReveal: handleReveal,
+                            }}
+                        />
                     ))}
                 </div>
             </div>
 
-            {/* ── Locales ── */}
             <div className="zotflow-csl-section zotflow-csl-section--locales">
-                <div className="zotflow-csl-section-header">
-                    <span>Locales</span>
-                    <button
-                        className="clickable-icon"
-                        aria-label="Add locale"
-                        onClick={openAddLocale}
-                    >
-                        <ObsidianIcon icon="plus" />
-                    </button>
-                </div>
-
+                <SectionHeader
+                    label="Locales"
+                    count={locales.length}
+                    checkedAt={checked.locales}
+                    busy={busy}
+                    onUpdateAll={
+                        remoteLocales.length > 0
+                            ? handleUpdateAllLocales
+                            : undefined
+                    }
+                    onAdd={() =>
+                        new AddCslLocaleModal(
+                            services.app,
+                            () => void refresh(),
+                        ).open()
+                    }
+                />
                 <div className="zotflow-csl-list">
                     {locales.map((locale) => (
-                    <div className="zotflow-csl-row" key={locale.tag}>
-                        <div className="zotflow-csl-row-info">
-                            <div className="zotflow-csl-row-title">
-                                {locale.tag}
-                            </div>
-                            <div
-                                className="zotflow-csl-row-meta"
-                                title={locale.sourceUrl}
-                            >
-                                {locale.source === "builtin"
-                                    ? "bundled"
-                                    : locale.source === "folder"
-                                      ? "from styles folder"
-                                      : [
-                                            "downloaded",
-                                            locale.fetchedAt
-                                                ? `fetched ${fmtDate(locale.fetchedAt)}`
-                                                : null,
-                                        ]
-                                            .filter(Boolean)
-                                            .join(" · ")}
-                            </div>
-                        </div>
-                        {locale.source === "remote-cache" ? (
-                            <>
-                                <button
-                                    className="clickable-icon"
-                                    aria-label={`Update ${locale.tag}`}
-                                    disabled={busy}
-                                    onClick={() =>
-                                        void handleUpdateLocale(locale.tag)
-                                    }
-                                >
-                                    <ObsidianIcon icon="refresh-cw" />
-                                </button>
-                                <button
-                                    className="clickable-icon"
-                                    aria-label={`Remove ${locale.tag}`}
-                                    disabled={busy}
-                                    onClick={() =>
-                                        void handleRemoveLocale(locale.tag)
-                                    }
-                                >
-                                    <ObsidianIcon icon="trash-2" />
-                                </button>
-                            </>
-                        ) : (
-                            <span className="zotflow-csl-muted">
-                                {locale.source === "builtin"
-                                    ? "always available"
-                                    : "folder"}
-                            </span>
-                        )}
-                    </div>
+                        <LocaleRow
+                            key={locale.tag}
+                            locale={locale}
+                            busy={busy}
+                            onUpdate={handleUpdateLocale}
+                            onRemove={handleRemoveLocale}
+                        />
                     ))}
                 </div>
+                <p className="zotflow-csl-footnote">
+                    Locales download automatically when a style needs them.
+                    en-US is always available offline.
+                </p>
             </div>
         </div>
     );

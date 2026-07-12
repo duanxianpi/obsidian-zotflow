@@ -1,5 +1,6 @@
 import CSL from "citeproc";
 import { LOCALE_EN_US } from "./assets/locale-en-US";
+import { bustCache } from "./styles";
 import type { KVStore, ResourceFetcher } from "./ports";
 import type { RemoteMeta } from "./types";
 
@@ -42,6 +43,7 @@ export class LocaleStore {
 	private memory = new Map<string, string>();
 	private custom = new Map<string, string>();
 	private urlTemplate: string;
+	private enUsOverrideChecked = false;
 
 	constructor(
 		private fetcher: ResourceFetcher,
@@ -50,6 +52,19 @@ export class LocaleStore {
 	) {
 		this.urlTemplate = config?.localeUrlTemplate ?? DEFAULT_LOCALE_URL;
 		this.memory.set("en-US", LOCALE_EN_US);
+	}
+
+	/**
+	 * The bundled en-US is seeded into memory synchronously, but the user
+	 * may have updated it — the KV copy then overrides the bundled asset.
+	 * Loaded lazily on the first ensure()/update() of a session, which
+	 * always happens before any engine's synchronous getSync() lookup.
+	 */
+	private async loadEnUsOverride(): Promise<void> {
+		if (this.enUsOverrideChecked) return;
+		this.enUsOverrideChecked = true;
+		const cached = await this.store.get(KEY_PREFIX + "en-US");
+		if (cached !== null) this.memory.set("en-US", cached);
 	}
 
 	localeUrl(lang: string): string {
@@ -97,6 +112,7 @@ export class LocaleStore {
 	 * network. Returns true on success, false if it cannot be obtained.
 	 */
 	async ensure(lang: string): Promise<boolean> {
+		await this.loadEnUsOverride();
 		const norm = normalizeLocale(lang);
 		if (this.custom.has(norm) || this.memory.has(norm)) return true;
 
@@ -121,17 +137,23 @@ export class LocaleStore {
 	/**
 	 * Refetch a cached locale from its recorded source URL. Returns whether
 	 * the content changed. Throws when the refetch fails (the cached copy is
-	 * kept) or when the locale is not a downloaded one.
+	 * kept) or when the locale is not a downloaded one. The bundled en-US
+	 * is updatable: the fetched copy overlays the bundled asset.
 	 */
 	async update(lang: string): Promise<{ updated: boolean }> {
+		await this.loadEnUsOverride();
 		const norm = normalizeLocale(lang);
-		const old = await this.store.get(KEY_PREFIX + norm);
+		const old =
+			(await this.store.get(KEY_PREFIX + norm)) ??
+			(norm === "en-US" ? (this.memory.get("en-US") ?? null) : null);
 		if (old === null) {
 			throw new Error(`locale "${norm}" is not a downloaded locale`);
 		}
 		const meta = await this.getMeta(norm);
 		const url = meta?.sourceUrl ?? this.localeUrl(norm);
-		const xml = await this.fetcher.fetchText(url);
+		// Bypass the HTTP disk cache: an offline "update" answered from the
+		// cache would falsely report the locale as up to date.
+		const xml = await this.fetcher.fetchText(bustCache(url));
 		if (!xml.includes("<locale")) {
 			throw new Error(`response for locale "${norm}" does not look like locale XML`);
 		}

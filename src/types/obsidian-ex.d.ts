@@ -315,6 +315,9 @@ declare module "obsidian" {
 
         appId: string;
         metadataTypeManager: MetadataTypeManager;
+
+        /** Undocumented: reveal a vault path in the system file explorer (desktop only). */
+        showInFolder(path: string): void;
     }
 
     interface EmbedRegistry {

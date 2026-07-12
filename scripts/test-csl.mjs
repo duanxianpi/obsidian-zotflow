@@ -107,10 +107,13 @@ class StubFetcher {
         this.offline = false;
     }
     async fetchText(url) {
-        this.calls.push(url);
-        if (this.offline) throw new Error(`offline: ${url}`);
-        const body = this.routes[url];
-        if (body === undefined) throw new Error(`404: ${url}`);
+        // Update refetches append a cache-busting query param; routes and
+        // call counting work on the clean URL.
+        const clean = url.split("?")[0];
+        this.calls.push(clean);
+        if (this.offline) throw new Error(`offline: ${clean}`);
+        const body = this.routes[clean];
+        if (body === undefined) throw new Error(`404: ${clean}`);
         return body;
     }
 }
@@ -134,6 +137,22 @@ const CYCLE_B = `<?xml version="1.0" encoding="utf-8"?>
 <style xmlns="http://purl.org/net/xbiblio/csl" version="1.0">
   <info><title>Cycle B</title><id>http://www.zotero.org/styles/cycle-b</id>
   <link href="http://www.zotero.org/styles/cycle-a" rel="independent-parent"/></info>
+</style>`;
+
+/** Minimal dependent style (alias) pointing at the given parent slug. */
+const makeAlias = (id, parent) => `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0">
+  <info><title>${id} Journal</title><id>http://www.zotero.org/styles/${id}</id>
+  <category citation-format="numeric"/>
+  <link href="http://www.zotero.org/styles/${parent}" rel="independent-parent"/></info>
+</style>`;
+
+/** Independent note-only style: has <citation> but deliberately no <bibliography>. */
+const NOTE_ONLY = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="note" version="1.0" default-locale="en-US">
+  <info><title>Notes Only</title><id>http://www.zotero.org/styles/notes-only</id>
+  <category citation-format="note"/></info>
+  <citation><layout><text variable="title"/></layout></citation>
 </style>`;
 
 const ITEMS = {
@@ -190,7 +209,8 @@ const ITEMS = {
 
 await ensureFixtures();
 const core = await bundleCore();
-const { CslRenderService, MemoryKVStore, UnavailableStyleError } = core;
+const { CslRenderService, MemoryKVStore, UnavailableStyleError, extractStyleMeta } =
+    core;
 
 const fx = async (name) => readFile(join(FIXTURES, name), "utf8");
 const apa = await fx("apa.csl");
@@ -503,6 +523,20 @@ await test("updateStyle refetches the whole dependency chain", async () => {
         threw = true;
     }
     check(threw, "updateStyle refuses styles without a source url");
+
+    // Offline update must report a failure, never "up to date".
+    fetcher.offline = true;
+    const offline = await service.updateStyle("nature-neuroscience");
+    check(offline.failed.length > 0, "offline update reports failures");
+    check(
+        offline.updated.length === 0 && offline.unchanged.length === 0,
+        "offline update reports nothing as checked",
+    );
+    fetcher.offline = false;
+    const [entry] = await service.renderBibliography([ITEMS.doe2020], {
+        styleId: "nature-neuroscience",
+    });
+    check(entry.includes("Doe"), "cached copy still renders after failed update");
 });
 
 await test("locale preview/add/update with provenance", async () => {
@@ -585,6 +619,151 @@ await test("style preview: rendered sample fetched when available", async () => 
     });
     const noSample = await bareService.previewStyle("apa");
     check(noSample.sample === undefined, "missing sample tolerated");
+});
+
+await test("meta extraction: citation-format + hasBibliography (never inferred)", async () => {
+    const apaMeta = extractStyleMeta(apa);
+    check(apaMeta.citationFormat === "author-date", "apa citation-format");
+    check(apaMeta.hasBibliography === true, "apa declares <bibliography>");
+
+    const ieeeMeta = extractStyleMeta(ieee);
+    check(ieeeMeta.citationFormat === "numeric", "ieee citation-format");
+
+    const noteMeta = extractStyleMeta(NOTE_ONLY);
+    check(noteMeta.citationFormat === "note", "note-only citation-format");
+    check(
+        noteMeta.hasBibliography === false,
+        "note-only style: <bibliography> absence recorded, not guessed",
+    );
+
+    const aliasMeta = extractStyleMeta(natureNeuro);
+    check(
+        aliasMeta.hasBibliography === undefined,
+        "dependent style: hasBibliography unknown (inherited from parent)",
+    );
+});
+
+await test("ref-counted removal: aliases share an implicit parent", async () => {
+    const { service } = makeService({
+        "style://alias-one": makeAlias("alias-one", "nature"),
+        "style://alias-two": makeAlias("alias-two", "nature"),
+        "style://nature": nature,
+        "locale://en-GB": enUS,
+    });
+    await service.addStyle(await service.previewStyle("alias-one"));
+    await service.addStyle(await service.previewStyle("alias-two"));
+
+    const styles = await service.listStyles();
+    const parent = styles.find((s) => s.id === "nature");
+    check(parent?.explicit === false, "auto-fetched parent is implicit");
+    check(
+        styles.find((s) => s.id === "alias-one")?.explicit === true,
+        "directly added alias is explicit",
+    );
+
+    await service.removeStyle("alias-one");
+    let ids = (await service.listStyles()).map((s) => s.id);
+    check(ids.includes("nature"), "parent kept while another alias needs it");
+
+    await service.removeStyle("alias-two");
+    ids = (await service.listStyles()).map((s) => s.id);
+    check(!ids.includes("nature"), "orphaned implicit parent pruned");
+    check(ids.length === 0, "nothing left installed");
+});
+
+await test("ref-counted removal: explicitly installed parent survives", async () => {
+    const { service } = makeService({
+        "style://alias-one": makeAlias("alias-one", "nature"),
+        "style://nature": nature,
+        "locale://en-GB": enUS,
+    });
+    // User installs the parent directly, then an alias of it.
+    await service.addStyle(await service.previewStyle("nature"));
+    await service.addStyle(await service.previewStyle("alias-one"));
+
+    await service.removeStyle("alias-one");
+    const ids = (await service.listStyles()).map((s) => s.id);
+    check(
+        ids.includes("nature"),
+        "explicit parent survives alias removal (no mis-delete)",
+    );
+});
+
+await test("updateAllStyles: shared parent refetched once, checkedAt persisted", async () => {
+    const routes = {
+        "style://alias-one": makeAlias("alias-one", "nature"),
+        "style://alias-two": makeAlias("alias-two", "nature"),
+        "style://nature": nature,
+        "locale://en-GB": enUS,
+    };
+    const { service, fetcher } = makeService(routes);
+    await service.addStyle(await service.previewStyle("alias-one"));
+    await service.addStyle(await service.previewStyle("alias-two"));
+
+    const before = fetcher.calls.filter((u) => u === "style://nature").length;
+    const report = await service.updateAllStyles();
+    const after = fetcher.calls.filter((u) => u === "style://nature").length;
+    check(after - before === 1, "shared parent refetched exactly once");
+    check(
+        report.unchanged.filter((id) => id === "nature").length === 1,
+        "shared parent reported once",
+    );
+    check(typeof report.checkedAt === "number", "checkedAt returned");
+
+    const status = await service.getUpdateStatus();
+    check(
+        status.stylesCheckedAt === report.checkedAt,
+        "styles checkedAt persisted",
+    );
+    check(status.localesCheckedAt === undefined, "locales never checked yet");
+
+    const locReport = await service.updateAllLocales();
+    check(
+        locReport.unchanged.includes("en-GB"),
+        "updateAllLocales walks cached locales",
+    );
+    check(
+        locReport.failed.some((f) => f.id === "en-US"),
+        "bundled en-US included in update-all (fails here: no route)",
+    );
+    check(
+        (await service.getUpdateStatus()).localesCheckedAt ===
+            locReport.checkedAt,
+        "locales checkedAt persisted",
+    );
+});
+
+await test("bundled en-US is updatable; overlay survives a restart", async () => {
+    // A recognisably different repo copy: rewrite the "no date" term.
+    const modified = enUS.split("n.d.").join("X.Y.");
+    const store = new MemoryKVStore();
+    const service = new CslRenderService({
+        fetcher: new StubFetcher({ "locale://en-US": modified }),
+        store,
+        styleUrlTemplate: "style://{id}",
+        localeUrlTemplate: "locale://{lang}",
+    });
+
+    const { updated } = await service.updateLocale("en-US");
+    check(updated === true, "overlay differs from the bundled asset");
+
+    const en = (await service.listLocales()).find((l) => l.tag === "en-US");
+    check(en?.source === "builtin", "en-US stays listed as builtin");
+    check(typeof en?.fetchedAt === "number", "overlay provenance surfaced");
+
+    // A fresh service over the same store (= plugin restart) must serve
+    // the overlay, not the bundled asset.
+    const restarted = new CslRenderService({
+        fetcher: new StubFetcher(),
+        store,
+        styleUrlTemplate: "style://{id}",
+        localeUrlTemplate: "locale://{lang}",
+    });
+    const [entry] = await restarted.renderBibliography(
+        [ITEMS.vaswaniNoDate],
+        { styleXml: apa, format: "text" },
+    );
+    check(entry.includes("(X.Y.)"), "updated en-US terms used after restart");
 });
 
 /* ---------------------------------------------------------------- */

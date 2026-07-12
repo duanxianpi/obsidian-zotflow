@@ -317,12 +317,15 @@ src/
 │   │   ├── ZotFlowActivityCenter.tsx # Tab container component
 │   │   ├── SyncView.tsx            # Sync tab content (stub)
 │   │   ├── TemplateTestView.tsx    # Template testing tab
-│   │   └── CslStylesView.tsx       # CSL tab: manage citation styles & locales
+│   │   ├── CslStylesView.tsx       # CSL tab: styles (aliases nested under parents) & locales
+│   │   └── CslRows.tsx             # CSL tab row components (status dot, badges, alias rows)
 │   └── modals/
 │       ├── suggest.ts              # BaseItemSearchModal + ZoteroSearchModal
 │       ├── item-picker.ts          # ItemPickerModal (extends BaseItemSearchModal)
 │       ├── file-picker.ts          # FilePickerModal (local vault file picker)
-│       └── csl-add-modal.ts        # AddCslStyleModal / AddCslLocaleModal (fetch-by-id preview + add)
+│       ├── csl-add-modal.ts        # AddCslStyleModal / AddCslLocaleModal (fetch-by-id preview + add)
+│       ├── csl-details-modal.ts    # StyleDetailsModal (state-aware actions for installed styles)
+│       └── csl-style-details.ts    # Shared StyleDetails block (meta table + deps + preview)
 │
 ├── worker/
 │   ├── worker.ts                   # Worker entry point — exposes WorkerAPI via Comlink

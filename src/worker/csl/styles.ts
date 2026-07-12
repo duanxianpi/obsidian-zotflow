@@ -9,9 +9,21 @@ const MAX_DEPENDENT_DEPTH = 5;
 
 const DEFAULT_STYLE_URL = "https://www.zotero.org/styles/{id}";
 
+/**
+ * Update refetches must not be answered by the HTTP disk cache (Electron's
+ * net stack honors Cache-Control, so an offline "update" would silently
+ * report the cached copy as up to date). A throwaway query param forces a
+ * real network hit; the clean URL is what gets recorded as provenance.
+ */
+export function bustCache(url: string): string {
+	return `${url}${url.includes("?") ? "&" : "?"}zfbust=${Date.now()}`;
+}
+
 interface CachedMeta extends StyleMeta {
 	invalidReason?: string;
 	remote?: RemoteMeta;
+	/** True when installed directly by the user (vs pulled in as a parent). */
+	explicit?: boolean;
 }
 
 export interface CustomEntry {
@@ -27,6 +39,8 @@ export interface LocalStyle {
 	meta?: StyleMeta;
 	invalidReason?: string;
 	remote?: RemoteMeta;
+	/** True when installed directly by the user (remote-cache styles only). */
+	explicit?: boolean;
 }
 
 /** Successful chain resolution down to an independent style. */
@@ -128,28 +142,41 @@ export class StyleRepository {
 			meta: meta?.invalidReason ? undefined : meta,
 			invalidReason: meta?.invalidReason,
 			remote: meta?.remote,
+			explicit: meta?.explicit,
 		};
 	}
 
 	/**
 	 * Fetch a style and cache it together with its provenance. `sourceUrl`
 	 * defaults to the standard zotero.org location for the slug. Throws on
-	 * failure.
+	 * failure. Dependency-driven fetches are implicit (explicit: false).
+	 * `fresh` bypasses the HTTP cache (update refetches).
 	 */
-	async fetchAndCache(id: string, sourceUrl?: string): Promise<LocalStyle> {
+	async fetchAndCache(
+		id: string,
+		sourceUrl?: string,
+		opts?: { fresh?: boolean }
+	): Promise<LocalStyle> {
 		const url = sourceUrl ?? this.styleUrl(id);
-		const xml = await this.fetcher.fetchText(url);
+		const xml = await this.fetcher.fetchText(
+			opts?.fresh ? bustCache(url) : url
+		);
 		if (!xml.includes("<style")) {
 			throw new Error(`response for style "${id}" does not look like CSL XML`);
 		}
 		return this.cacheFetched(id, url, xml);
 	}
 
-	/** Persist an already-fetched style (preview flow: fetch once, add later). */
+	/**
+	 * Persist an already-fetched style. `explicit` marks a direct user
+	 * install and is sticky: once a style is explicit, refetching it as a
+	 * dependency or during an update never demotes it back to implicit.
+	 */
 	async cacheFetched(
 		id: string,
 		sourceUrl: string,
-		xml: string
+		xml: string,
+		opts?: { explicit?: boolean }
 	): Promise<LocalStyle> {
 		let meta: StyleMeta | undefined;
 		let invalidReason: string | undefined;
@@ -158,6 +185,9 @@ export class StyleRepository {
 		} catch (e) {
 			invalidReason = (e as Error).message;
 		}
+		const prevRaw = await this.store.get(STYLE_META_PREFIX + id);
+		const prev = prevRaw ? (JSON.parse(prevRaw) as CachedMeta) : undefined;
+		const explicit = opts?.explicit === true || prev?.explicit === true;
 		const remote: RemoteMeta = { sourceUrl, fetchedAt: Date.now() };
 		await this.store.set(STYLE_PREFIX + id, xml);
 		await this.store.set(
@@ -166,9 +196,40 @@ export class StyleRepository {
 				...(meta ?? { dependent: false }),
 				invalidReason,
 				remote,
+				explicit,
 			})
 		);
-		return { xml, source: "remote-cache", meta, invalidReason, remote };
+		return {
+			xml,
+			source: "remote-cache",
+			meta,
+			invalidReason,
+			remote,
+			explicit,
+		};
+	}
+
+	/**
+	 * Installed styles (folder + cached) whose independent-parent link points
+	 * at `parent`. Used for ref-counted cleanup: an implicit parent is only
+	 * removed when nothing depends on it anymore.
+	 */
+	async dependentsOf(parent: string): Promise<string[]> {
+		const out: string[] = [];
+		for (const [key, entry] of this.custom) {
+			if (entry.meta?.dependent && entry.meta.parent === parent) {
+				out.push(key);
+			}
+		}
+		for (const key of await this.store.list(STYLE_META_PREFIX)) {
+			const raw = await this.store.get(key);
+			if (raw === null) continue;
+			const meta = JSON.parse(raw) as CachedMeta;
+			if (meta.dependent && meta.parent === parent) {
+				out.push(key.slice(STYLE_META_PREFIX.length));
+			}
+		}
+		return out;
 	}
 
 	/** Remove a cached remote style. Folder styles are files; not removable here. */
@@ -322,14 +383,19 @@ export class StyleRepository {
 	 * user-owned files — but the walk continues through them. A member
 	 * that fails to refetch keeps its cached copy and the walk continues
 	 * along that copy's parent link.
+	 *
+	 * A shared `visited` set can be passed so update-all refetches a parent
+	 * shared by many aliases only once.
 	 */
-	async updateChain(id: string): Promise<ChainUpdateResult> {
+	async updateChain(
+		id: string,
+		visited: Set<string> = new Set()
+	): Promise<ChainUpdateResult> {
 		const result: ChainUpdateResult = {
 			updated: [],
 			unchanged: [],
 			failed: [],
 		};
-		const visited = new Set<string>();
 		let currentId = id;
 
 		for (let depth = 0; depth <= MAX_DEPENDENT_DEPTH; depth++) {
@@ -342,7 +408,9 @@ export class StyleRepository {
 				const url = entry?.remote?.sourceUrl ?? this.styleUrl(currentId);
 				try {
 					const old = entry?.xml;
-					entry = await this.fetchAndCache(currentId, url);
+					entry = await this.fetchAndCache(currentId, url, {
+						fresh: true,
+					});
 					(entry.xml === old ? result.unchanged : result.updated).push(
 						currentId
 					);

@@ -1,68 +1,21 @@
-import { ButtonComponent, Modal, sanitizeHTMLToDom, Setting } from "obsidian";
+import { ButtonComponent, Modal, setIcon, Setting } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
+import { renderStyleDetails } from "ui/modals/csl-style-details";
 
 import type { App } from "obsidian";
 import type { LocalePreview, StylePreview } from "worker/csl";
 
-/** Skeleton width modifier classes, cycled so the bars look organic. */
-const SKELETON_WIDTHS = ["w60", "w35", "w50", "w80", "w70"] as const;
-
-/**
- * Build a label/value info card. Rows start as skeleton bars (so the modal
- * keeps its final footprint before anything is fetched) and are filled in
- * once data arrives.
- */
-class InfoCard {
-    private rows = new Map<string, HTMLElement>();
-
-    constructor(
-        private cardEl: HTMLElement,
-        labels: string[],
-    ) {
-        cardEl.addClass("zotflow-csl-modal-card");
-        labels.forEach((label, i) => {
-            const row = cardEl.createDiv("zotflow-csl-modal-row");
-            row.createSpan({ cls: "zotflow-csl-modal-label", text: label });
-            const value = row.createSpan("zotflow-csl-modal-value");
-            value.createSpan(
-                `zotflow-csl-skeleton zotflow-csl-skeleton--${SKELETON_WIDTHS[i % SKELETON_WIDTHS.length]}`,
-            );
-            this.rows.set(label, value);
-        });
-    }
-
-    set(label: string, text: string): void {
-        const value = this.rows.get(label);
-        if (!value) return;
-        value.empty();
-        value.setText(text);
-    }
-
-    /** Reset every row back to its skeleton bar. */
-    reset(): void {
-        let i = 0;
-        for (const value of this.rows.values()) {
-            value.empty();
-            value.createSpan(
-                `zotflow-csl-skeleton zotflow-csl-skeleton--${SKELETON_WIDTHS[i++ % SKELETON_WIDTHS.length]}`,
-            );
-        }
-    }
-}
-
 /**
  * BRAT-style "add by id" modal: the user enters a style id (or full URL)
- * from https://www.zotero.org/styles/, the style is fetched and its basic
- * info plus a rendered sample shown, and Add installs it together with its
- * dependency chain and default locale. Unpublished custom styles go in the
- * vault styles folder instead.
+ * from https://www.zotero.org/styles/, the style is fetched and its
+ * metadata, dependency impact and rendered preview are shown for
+ * confirmation; Add stays disabled until a fetch succeeds. Unpublished
+ * custom styles go in the vault styles folder instead.
  */
 export class AddCslStyleModal extends Modal {
     private preview: StylePreview | null = null;
-    private info!: InfoCard;
-    private noticeEl!: HTMLElement;
-    private previewEl!: HTMLElement;
+    private resultEl!: HTMLElement;
     private addBtn!: ButtonComponent;
     private busy = false;
 
@@ -85,7 +38,7 @@ export class AddCslStyleModal extends Modal {
             .setName("Style ID or URL")
             .setDesc(
                 createFragment((f) => {
-                    f.appendText("Find styles in the ");
+                    f.appendText("Paste from the ");
                     f.createEl("a", {
                         text: "Zotero style repository",
                         href: "https://www.zotero.org/styles/",
@@ -105,16 +58,8 @@ export class AddCslStyleModal extends Modal {
                 btn.setButtonText("Fetch").setCta().onClick(doFetch);
             });
 
-        this.info = new InfoCard(
-            contentEl.createDiv("zotflow-csl-modal-info"),
-            ["Title", "ID", "Type", "Default locale", "Source"],
-        );
-        this.noticeEl = contentEl.createDiv("zotflow-csl-modal-notice");
-
-        this.previewEl = contentEl.createDiv(
-            "zotflow-csl-modal-card zotflow-csl-modal-preview",
-        );
-        this.renderPreviewSkeleton();
+        this.resultEl = contentEl.createDiv("zotflow-csl-add-result");
+        this.renderIdle();
 
         const buttons = new Setting(contentEl).setClass(
             "zotflow-csl-modal-buttons",
@@ -124,54 +69,82 @@ export class AddCslStyleModal extends Modal {
         });
         buttons.addButton((btn) => {
             this.addBtn = btn;
-            btn.setButtonText("Add")
+            btn.setButtonText("Add style")
                 .setCta()
                 .setDisabled(true)
                 .onClick(() => void this.add());
         });
     }
 
-    private renderPreviewSkeleton(): void {
-        this.previewEl.empty();
-        this.previewEl.createDiv({
-            cls: "zotflow-csl-modal-card-heading",
-            text: "Preview",
+    private renderIdle(): void {
+        this.resultEl.empty();
+        this.resultEl.createDiv({
+            cls: "zotflow-csl-add-idle",
+            text: "Fetch a style to preview it before adding.",
         });
-        for (const width of ["w80", "w35", "w70", "w60"]) {
-            this.previewEl
-                .createDiv("zotflow-csl-modal-row")
-                .createSpan(
-                    `zotflow-csl-skeleton zotflow-csl-skeleton--${width}`,
-                );
-        }
     }
 
-    private renderPreviewSample(p: StylePreview): void {
-        this.previewEl.empty();
-        this.previewEl.createDiv({
-            cls: "zotflow-csl-modal-card-heading",
-            text: "Preview",
-        });
-        if (!p.sample) {
-            this.previewEl.createDiv({
-                cls: "zotflow-csl-modal-muted",
-                text: "No rendered preview is available for this style.",
-            });
-            return;
-        }
-        if (p.sample.citations.length > 0) {
-            const cite = this.previewEl.createDiv("zotflow-csl-modal-citation");
-            // Citation strings are HTML-encoded (e.g. "&#38;").
-            cite.appendChild(
-                sanitizeHTMLToDom(p.sample.citations.join("&#8195;")),
+    private renderLoading(): void {
+        this.resultEl.empty();
+        const card = this.resultEl.createDiv(
+            "zotflow-csl-modal-card is-loading",
+        );
+        for (const width of ["w60", "w35", "w80", "w50", "w70"]) {
+            card.createDiv("zotflow-csl-modal-row").createSpan(
+                `zotflow-csl-skeleton zotflow-csl-skeleton--${width}`,
             );
         }
-        const bib = this.previewEl.createDiv("zotflow-csl-modal-bib");
-        bib.appendChild(sanitizeHTMLToDom(p.sample.bibliographyHtml));
     }
 
-    private setLoading(loading: boolean): void {
-        this.contentEl.toggleClass("is-loading", loading);
+    private renderError(input: string): void {
+        this.resultEl.empty();
+        const box = this.resultEl.createDiv(
+            "zotflow-csl-callout zotflow-csl-callout--error",
+        );
+        const icon = box.createSpan("zotflow-csl-inline-icon");
+        setIcon(icon, "alert-triangle");
+        const text = box.createSpan();
+        text.appendText("Couldn't fetch ");
+        text.createSpan({ cls: "zotflow-csl-mono", text: input.trim() });
+        text.appendText(
+            ". Check the ID against the Zotero style repository, or paste the full style URL.",
+        );
+    }
+
+    private renderResult(p: StylePreview): void {
+        this.resultEl.empty();
+
+        if (p.dependent && p.parent) {
+            const box = this.resultEl.createDiv("zotflow-csl-details-note");
+            const icon = box.createSpan("zotflow-csl-inline-icon");
+            setIcon(icon, "corner-down-right");
+            const text = box.createSpan();
+            text.appendText("This is an alias of ");
+            text.createSpan({ cls: "zotflow-csl-strong", text: p.parent });
+            text.appendText(" — the parent style will be downloaded too.");
+        }
+        if (p.alreadyInstalled) {
+            const box = this.resultEl.createDiv(
+                "zotflow-csl-callout zotflow-csl-callout--warning",
+            );
+            const icon = box.createSpan("zotflow-csl-inline-icon");
+            setIcon(icon, "alert-triangle");
+            box.createSpan({
+                text: "A style with this id is already installed — adding will overwrite it.",
+            });
+        }
+
+        const details = renderStyleDetails(this.resultEl, {
+            id: p.id,
+            title: p.title,
+            citationFormat: p.citationFormat,
+            hasBibliography: p.hasBibliography,
+            defaultLocale: p.defaultLocale,
+            source: "remote",
+            sourceUrl: p.sourceUrl,
+            aliasOf: p.dependent ? p.parent : undefined,
+        });
+        details.setSample(p.sample);
     }
 
     private async fetchPreview(input: string): Promise<void> {
@@ -179,30 +152,10 @@ export class AddCslStyleModal extends Modal {
         this.busy = true;
         this.preview = null;
         this.addBtn.setDisabled(true);
-        this.noticeEl.empty();
-        this.info.reset();
-        this.renderPreviewSkeleton();
-        this.setLoading(true);
+        this.renderLoading();
         try {
             this.preview = await workerBridge.cslRender.previewStyle(input);
-            const p = this.preview;
-            this.info.set("Title", p.title ?? "(untitled)");
-            this.info.set("ID", p.id);
-            this.info.set(
-                "Type",
-                p.dependent
-                    ? `dependent (parent: ${p.parent ?? "unknown"})`
-                    : "independent",
-            );
-            this.info.set("Default locale", p.defaultLocale ?? "—");
-            this.info.set("Source", p.sourceUrl);
-            if (p.alreadyInstalled) {
-                this.noticeEl.createDiv({
-                    cls: "zotflow-csl-modal-warning",
-                    text: "A style with this id is already installed — adding will overwrite it.",
-                });
-            }
-            this.renderPreviewSample(p);
+            this.renderResult(this.preview);
             this.addBtn.setDisabled(false);
         } catch (e) {
             services.logService.error(
@@ -210,13 +163,8 @@ export class AddCslStyleModal extends Modal {
                 "AddCslStyleModal",
                 e,
             );
-            this.info.reset();
-            this.noticeEl.createDiv({
-                cls: "zotflow-csl-modal-error",
-                text: `Could not fetch "${input.trim()}" — check the id and your connection.`,
-            });
+            this.renderError(input);
         } finally {
-            this.setLoading(false);
             this.busy = false;
         }
     }
@@ -245,7 +193,7 @@ export class AddCslStyleModal extends Modal {
                 "error",
                 `Failed to add style "${this.preview.id}".`,
             );
-            this.addBtn.setDisabled(false).setButtonText("Add");
+            this.addBtn.setDisabled(false).setButtonText("Add style");
         } finally {
             this.busy = false;
         }
@@ -256,11 +204,10 @@ export class AddCslStyleModal extends Modal {
     }
 }
 
-/** Companion modal for locales: enter a BCP-47 tag, preview, then add. */
+/** Companion modal for locales: enter a BCP-47 tag, confirm, then add. */
 export class AddCslLocaleModal extends Modal {
     private preview: LocalePreview | null = null;
-    private info!: InfoCard;
-    private noticeEl!: HTMLElement;
+    private resultEl!: HTMLElement;
     private addBtn!: ButtonComponent;
     private busy = false;
 
@@ -284,7 +231,14 @@ export class AddCslLocaleModal extends Modal {
             .setDesc(
                 createFragment((f) => {
                     f.appendText(
-                        "Enter a BCP-47 tag such as de-DE, zh-CN or fr-FR. The default locale of a style is downloaded automatically when the style is added.",
+                        "Enter a BCP-47 tag such as de-DE, zh-CN or fr-FR. Available tags are listed in the ",
+                    );
+                    f.createEl("a", {
+                        text: "Zotero locales repository",
+                        href: "https://github.com/citation-style-language/locales",
+                    });
+                    f.appendText(
+                        " (files are fetched from raw.githubusercontent.com). The default locale of a style is downloaded automatically when the style is added.",
                     );
                 }),
             )
@@ -300,11 +254,11 @@ export class AddCslLocaleModal extends Modal {
                 btn.setButtonText("Fetch").setCta().onClick(doFetch);
             });
 
-        this.info = new InfoCard(
-            contentEl.createDiv("zotflow-csl-modal-info"),
-            ["Locale", "Source"],
-        );
-        this.noticeEl = contentEl.createDiv("zotflow-csl-modal-notice");
+        this.resultEl = contentEl.createDiv("zotflow-csl-add-result");
+        this.resultEl.createDiv({
+            cls: "zotflow-csl-add-idle",
+            text: "Fetch a locale to confirm it before adding.",
+        });
 
         const buttons = new Setting(contentEl).setClass(
             "zotflow-csl-modal-buttons",
@@ -314,7 +268,7 @@ export class AddCslLocaleModal extends Modal {
         });
         buttons.addButton((btn) => {
             this.addBtn = btn;
-            btn.setButtonText("Add")
+            btn.setButtonText("Add locale")
                 .setCta()
                 .setDisabled(true)
                 .onClick(() => void this.add());
@@ -326,16 +280,39 @@ export class AddCslLocaleModal extends Modal {
         this.busy = true;
         this.preview = null;
         this.addBtn.setDisabled(true);
-        this.noticeEl.empty();
-        this.info.reset();
-        this.contentEl.addClass("is-loading");
+        this.resultEl.empty();
+        const card = this.resultEl.createDiv(
+            "zotflow-csl-modal-card is-loading",
+        );
+        for (const width of ["w35", "w70"]) {
+            card.createDiv("zotflow-csl-modal-row").createSpan(
+                `zotflow-csl-skeleton zotflow-csl-skeleton--${width}`,
+            );
+        }
         try {
             this.preview = await workerBridge.cslRender.previewLocale(input);
-            this.info.set("Locale", this.preview.tag);
-            this.info.set("Source", this.preview.sourceUrl);
+            this.resultEl.empty();
+            const table = this.resultEl.createDiv("zotflow-csl-details-table");
+            const row = (label: string, value: string, mono = false) => {
+                const rowEl = table.createDiv("zotflow-csl-details-row");
+                rowEl.createSpan({
+                    cls: "zotflow-csl-details-label",
+                    text: label,
+                });
+                rowEl.createSpan({
+                    cls: `zotflow-csl-details-value${mono ? " zotflow-csl-mono" : ""}`,
+                    text: value,
+                });
+            };
+            row("Locale", this.preview.tag, true);
+            row("Source", this.preview.sourceUrl);
             if (this.preview.alreadyInstalled) {
-                this.noticeEl.createDiv({
-                    cls: "zotflow-csl-modal-warning",
+                const box = this.resultEl.createDiv(
+                    "zotflow-csl-callout zotflow-csl-callout--warning",
+                );
+                const icon = box.createSpan("zotflow-csl-inline-icon");
+                setIcon(icon, "alert-triangle");
+                box.createSpan({
                     text: "This locale is already installed — adding will refresh it.",
                 });
             }
@@ -346,13 +323,17 @@ export class AddCslLocaleModal extends Modal {
                 "AddCslLocaleModal",
                 e,
             );
-            this.info.reset();
-            this.noticeEl.createDiv({
-                cls: "zotflow-csl-modal-error",
-                text: `Could not fetch locale "${input.trim()}" — check the tag.`,
-            });
+            this.resultEl.empty();
+            const box = this.resultEl.createDiv(
+                "zotflow-csl-callout zotflow-csl-callout--error",
+            );
+            const icon = box.createSpan("zotflow-csl-inline-icon");
+            setIcon(icon, "alert-triangle");
+            const text = box.createSpan();
+            text.appendText("Couldn't fetch locale ");
+            text.createSpan({ cls: "zotflow-csl-mono", text: input.trim() });
+            text.appendText(". Check the tag — e.g. de-DE, zh-CN, pt-BR.");
         } finally {
-            this.contentEl.removeClass("is-loading");
             this.busy = false;
         }
     }
@@ -379,7 +360,7 @@ export class AddCslLocaleModal extends Modal {
                 "error",
                 `Failed to add locale "${this.preview.tag}".`,
             );
-            this.addBtn.setDisabled(false).setButtonText("Add");
+            this.addBtn.setDisabled(false).setButtonText("Add locale");
         } finally {
             this.busy = false;
         }

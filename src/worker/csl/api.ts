@@ -24,6 +24,7 @@ import type {
 	StylePreview,
 	StyleSample,
 	StyleUpdateReport,
+	UpdateAllReport,
 } from "./types";
 import { extractStyleMeta, slugFromStyleUri } from "./xml";
 
@@ -33,6 +34,15 @@ import { extractStyleMeta, slugFromStyleUri } from "./xml";
  */
 const DEFAULT_SAMPLE_URL =
 	"https://www.zotero.org/styles-files/previews/combined/{path}.json";
+
+const STYLES_CHECKED_KEY = "styles-checked-at";
+const LOCALES_CHECKED_KEY = "locales-checked-at";
+
+/** When the last update-all check ran, per section (epoch ms). */
+export interface UpdateStatus {
+	stylesCheckedAt?: number;
+	localesCheckedAt?: number;
+}
 
 export interface CslRenderServiceConfig {
 	fetcher: ResourceFetcher;
@@ -61,11 +71,13 @@ export class CslRenderService {
 	private resolver: StyleResolver;
 	private pool = new EnginePool();
 	private fetcher: ResourceFetcher;
+	private store: KVStore;
 	private defaultFormat: OutputFormat;
 	private sampleUrlTemplate: string;
 
 	constructor(config: CslRenderServiceConfig) {
 		this.fetcher = config.fetcher;
+		this.store = config.store;
 		this.defaultFormat = config.defaultFormat ?? "text";
 		this.sampleUrlTemplate =
 			config.styleSampleUrlTemplate ?? DEFAULT_SAMPLE_URL;
@@ -229,6 +241,8 @@ export class CslRenderService {
 			dependent: meta.dependent,
 			parent: meta.parent,
 			defaultLocale: meta.defaultLocale,
+			citationFormat: meta.citationFormat,
+			hasBibliography: meta.hasBibliography,
 			alreadyInstalled: (await this.styles.getLocal(id)) !== null,
 			xml,
 			sample: await this.fetchSample(id, meta.dependent),
@@ -236,11 +250,24 @@ export class CslRenderService {
 	}
 
 	/**
+	 * Rendered sample for an installed style (Details modal). Best-effort:
+	 * undefined when the previews endpoint has none.
+	 */
+	async styleSample(id: string): Promise<StyleSample | undefined> {
+		const local = await this.styles.getLocal(id);
+		return this.fetchSample(id, local?.meta?.dependent ?? false);
+	}
+
+	/**
 	 * Install a previewed style: cache its XML with provenance, close the
-	 * dependency chain (downloading parents) and the default locale.
+	 * dependency chain (downloading parents) and the default locale. The
+	 * style itself is marked as explicitly installed; auto-fetched parents
+	 * stay implicit for ref-counted cleanup.
 	 */
 	async addStyle(preview: StylePreview): Promise<Availability> {
-		await this.styles.cacheFetched(preview.id, preview.sourceUrl, preview.xml);
+		await this.styles.cacheFetched(preview.id, preview.sourceUrl, preview.xml, {
+			explicit: true,
+		});
 		this.pool.clear(); // may shadow a pooled engine with the same id
 		return this.resolver.availability(preview.id, { allowNetwork: true });
 	}
@@ -318,7 +345,17 @@ export class CslRenderService {
 
 	/** All locales known locally: bundled en-US, folder-registered, cached. */
 	async listLocales(): Promise<LocaleInfo[]> {
-		const out: LocaleInfo[] = [{ tag: "en-US", source: "builtin" }];
+		// en-US is always available (bundled), but an update overlays it —
+		// surface the overlay's provenance so the row can show "Updated …".
+		const enUsMeta = await this.locales.getMeta("en-US");
+		const out: LocaleInfo[] = [
+			{
+				tag: "en-US",
+				source: "builtin",
+				sourceUrl: enUsMeta?.sourceUrl,
+				fetchedAt: enUsMeta?.fetchedAt,
+			},
+		];
 		const seen = new Set<string>(["en-US"]);
 		for (const tag of this.locales.listCustomTags()) {
 			if (seen.has(tag)) continue;
@@ -388,9 +425,94 @@ export class CslRenderService {
 		this.pool.clear();
 	}
 
+	/**
+	 * Remove a style. Ref-counted cleanup: removing an alias also prunes its
+	 * ancestor chain, but an ancestor is only deleted when it was pulled in
+	 * implicitly (never installed directly) and no other installed style
+	 * still depends on it.
+	 */
 	async removeStyle(id: string): Promise<void> {
+		// Capture the ancestor chain before the leaf disappears.
+		const ancestors: string[] = [];
+		const seen = new Set<string>([id]);
+		let cur = await this.styles.getLocal(id);
+		while (cur?.meta?.dependent && cur.meta.parent) {
+			const parent = cur.meta.parent;
+			if (seen.has(parent)) break; // defensive: cycles in hand-written files
+			seen.add(parent);
+			ancestors.push(parent);
+			cur = await this.styles.getLocal(parent);
+		}
+
 		await this.styles.remove(id);
+
+		for (const ancestor of ancestors) {
+			const entry = await this.styles.getLocal(ancestor);
+			// Stop at folder styles (user-owned) and explicit installs.
+			if (!entry || entry.source !== "remote-cache" || entry.explicit) {
+				break;
+			}
+			const dependents = await this.styles.dependentsOf(ancestor);
+			if (dependents.length > 0) break; // still referenced
+			await this.styles.remove(ancestor);
+		}
 		this.pool.clear();
+	}
+
+	/**
+	 * Refetch every downloaded style (and, through the chains, every parent)
+	 * exactly once. Persists the check time for "Checked …" display.
+	 */
+	async updateAllStyles(): Promise<UpdateAllReport> {
+		const report: UpdateAllReport = {
+			updated: [],
+			unchanged: [],
+			failed: [],
+			checkedAt: Date.now(),
+		};
+		const visited = new Set<string>();
+		for (const id of await this.styles.listCachedIds()) {
+			const chain = await this.styles.updateChain(id, visited);
+			report.updated.push(...chain.updated);
+			report.unchanged.push(...chain.unchanged);
+			report.failed.push(...chain.failed);
+		}
+		this.pool.clear();
+		await this.store.set(STYLES_CHECKED_KEY, String(report.checkedAt));
+		return report;
+	}
+
+	/** Refetch every downloaded locale plus bundled en-US. Persists the check time. */
+	async updateAllLocales(): Promise<UpdateAllReport> {
+		const report: UpdateAllReport = {
+			updated: [],
+			unchanged: [],
+			failed: [],
+			checkedAt: Date.now(),
+		};
+		const tags = new Set(await this.locales.listCached());
+		tags.add("en-US"); // bundled, but updatable via overlay
+		for (const tag of tags) {
+			try {
+				const { updated } = await this.locales.update(tag);
+				(updated ? report.updated : report.unchanged).push(tag);
+			} catch (e) {
+				report.failed.push({ id: tag, reason: (e as Error).message });
+			}
+		}
+		this.pool.clear();
+		await this.store.set(LOCALES_CHECKED_KEY, String(report.checkedAt));
+		return report;
+	}
+
+	/** When update-all last ran for each section (undefined = never). */
+	async getUpdateStatus(): Promise<UpdateStatus> {
+		const styles = await this.store.get(STYLES_CHECKED_KEY);
+		const locales = await this.store.get(LOCALES_CHECKED_KEY);
+		return {
+			stylesCheckedAt: styles !== null ? Number(styles) : undefined,
+			localesCheckedAt: locales !== null ? Number(locales) : undefined,
+		};
 	}
 
 	/**
@@ -412,6 +534,8 @@ export class CslRenderService {
 				dependent: entry.meta?.dependent,
 				parent: entry.meta?.parent,
 				defaultLocale: entry.meta?.defaultLocale,
+				citationFormat: entry.meta?.citationFormat,
+				hasBibliography: entry.meta?.hasBibliography,
 				availability: entry.invalidReason
 					? { status: "invalid", reason: entry.invalidReason }
 					: await this.resolver.availability(key, { allowNetwork: false }),
@@ -429,6 +553,9 @@ export class CslRenderService {
 				dependent: local.meta?.dependent,
 				parent: local.meta?.parent,
 				defaultLocale: local.meta?.defaultLocale,
+				citationFormat: local.meta?.citationFormat,
+				hasBibliography: local.meta?.hasBibliography,
+				explicit: local.explicit,
 				remote: local.remote,
 				availability: local.invalidReason
 					? { status: "invalid", reason: local.invalidReason }
@@ -442,6 +569,8 @@ export class CslRenderService {
 	async clearCache(): Promise<void> {
 		await this.styles.clearCache();
 		await this.locales.clearCache();
+		await this.store.delete(STYLES_CHECKED_KEY);
+		await this.store.delete(LOCALES_CHECKED_KEY);
 		this.pool.clear();
 	}
 }
