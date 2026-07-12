@@ -87,16 +87,10 @@ export interface ZotFlowSettings {
     epubFontFamily: string;
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
-    /** CSL renderer: default BCP-47 locale, e.g. "en-US". */
-    cslDefaultLocale: string;
     /** CSL renderer: default output format. */
     cslDefaultFormat: CslOutputFormat;
     /** Vault-relative folder scanned for custom .csl styles; "" disables. */
     cslStylesFolder: string;
-    /** URL template for style downloads; {id} is replaced with the slug. */
-    cslStyleUrlTemplate: string;
-    /** URL template for locale downloads; {lang} is replaced with the tag. */
-    cslLocaleUrlTemplate: string;
 }
 
 /** Re-exported so main-thread settings UI can reference the format union. */
@@ -163,12 +157,8 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     autoDisableNoteImageTextTools: true,
     epubFontFamily: "",
     cslDefaultStyleId: "apa",
-    cslDefaultLocale: "en-US",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",
-    cslStyleUrlTemplate: "https://www.zotero.org/styles/{id}",
-    cslLocaleUrlTemplate:
-        "https://raw.githubusercontent.com/citation-style-language/locales/master/locales-{lang}.xml",
 };
 
 /** Default shape of the full `data.json` blob (settings + view states). */

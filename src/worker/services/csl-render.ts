@@ -9,11 +9,13 @@ import type {
     KVStore,
     ResourceFetcher,
     Availability,
+    LocalePreview,
     RenderOptions,
     StyleInfo,
+    StylePreview,
+    StyleUpdateReport,
 } from "worker/csl";
-import type { LocaleInfo, StyleIndexEntry } from "worker/csl";
-import type { IParentProxy } from "bridge/types";
+import type { LocaleInfo } from "worker/csl";
 import type { ZotFlowSettings } from "settings/types";
 
 /** KVStore adapter over the worker-only Dexie `cslCache` table. */
@@ -42,10 +44,10 @@ class DexieKVStore implements KVStore {
  * Only ever fetches data (XML/JSON) — never code.
  */
 class WorkerFetcher implements ResourceFetcher {
+    // Worker code cannot use requestUrl (main-thread Obsidian API); the
+    // worker's global fetch is patched in worker.ts to proxy through
+    // ParentHost.request, which uses requestUrl under the hood.
     async fetchText(url: string): Promise<string> {
-        // Worker code cannot use requestUrl (main-thread Obsidian API); the
-        // worker's global fetch is patched in worker.ts to proxy through
-        // ParentHost.request, which uses requestUrl under the hood.
         // eslint-disable-next-line no-restricted-globals
         const res = await fetch(url);
         if (!res.ok) {
@@ -63,40 +65,18 @@ class WorkerFetcher implements ResourceFetcher {
  */
 export class CslRenderWorkerService {
     private core: CslRenderService;
-    private ready: Promise<void>;
     private contexts = new Map<string, BibliographyContext>();
 
-    constructor(
-        settings: ZotFlowSettings,
-        private parentHost: IParentProxy,
-    ) {
+    constructor(settings: ZotFlowSettings) {
         this.core = new CslRenderService({
             fetcher: new WorkerFetcher(),
             store: new DexieKVStore(),
-            defaultLocale: settings.cslDefaultLocale,
             defaultFormat: settings.cslDefaultFormat,
-            styleUrlTemplate: settings.cslStyleUrlTemplate,
-            localeUrlTemplate: settings.cslLocaleUrlTemplate,
-        });
-        this.ready = this.core.init().catch((e: unknown) => {
-            void this.parentHost.log(
-                "error",
-                "CSL core init failed",
-                "CslRenderWorkerService",
-                e,
-            );
         });
     }
 
     updateSettings(settings: ZotFlowSettings): void {
-        this.core.setDefaults({
-            locale: settings.cslDefaultLocale,
-            format: settings.cslDefaultFormat,
-        });
-        this.core.setSources({
-            styleUrlTemplate: settings.cslStyleUrlTemplate,
-            localeUrlTemplate: settings.cslLocaleUrlTemplate,
-        });
+        this.core.setDefaults({ format: settings.cslDefaultFormat });
     }
 
     dispose(): void {
@@ -108,26 +88,20 @@ export class CslRenderWorkerService {
 
     /* ------------------------------ rendering ------------------------- */
 
-    async renderBibliography(
+    renderBibliography(
         items: CSLItem[],
         opts: RenderOptions,
     ): Promise<string[]> {
-        await this.ready;
         return this.core.renderBibliography(items, opts);
     }
 
-    async renderCitation(
-        items: CSLItem[],
-        opts: RenderOptions,
-    ): Promise<string> {
-        await this.ready;
+    renderCitation(items: CSLItem[], opts: RenderOptions): Promise<string> {
         return this.core.renderCitation(items, opts);
     }
 
     /* --------------------- id-keyed context API ------------------------ */
 
     async createContext(opts: RenderOptions): Promise<string> {
-        await this.ready;
         const ctx = await this.core.createContext(opts);
         const id = crypto.randomUUID();
         this.contexts.set(id, ctx);
@@ -173,80 +147,92 @@ export class CslRenderWorkerService {
 
     /* --------------------- style / locale management ------------------- */
 
-    async ensureStyle(id: string): Promise<Availability> {
-        await this.ready;
+    ensureStyle(id: string): Promise<Availability> {
         return this.core.ensureStyle(id);
     }
 
-    async resolveDeps(id: string): Promise<Availability> {
-        await this.ready;
+    resolveDeps(id: string): Promise<Availability> {
         return this.core.resolveDeps(id);
     }
 
-    async listStyles(): Promise<StyleInfo[]> {
-        await this.ready;
+    listStyles(): Promise<StyleInfo[]> {
         return this.core.listStyles();
     }
 
-    async registerCustomStyle(
-        key: string,
-        xml: string,
-        source: "folder" | "paste",
-    ): Promise<Availability> {
-        await this.ready;
-        return this.core.registerCustomStyle(key, xml, { source });
+    /** Fetch a style by id or URL for preview; nothing is installed yet. */
+    previewStyle(input: string): Promise<StylePreview> {
+        return this.core.previewStyle(input);
     }
 
-    async unregisterCustomStyle(key: string): Promise<void> {
-        await this.ready;
-        await this.core.unregisterCustomStyle(key);
+    /** Install a previewed style (dependency chain + default locale included). */
+    addStyle(preview: StylePreview): Promise<Availability> {
+        return this.core.addStyle(preview);
     }
 
-    async clearFolderStyles(): Promise<void> {
-        await this.ready;
+    /** Refetch a downloaded style and its whole dependency chain. */
+    updateStyle(id: string): Promise<StyleUpdateReport> {
+        return this.core.updateStyle(id);
+    }
+
+    /** Register a style from the vault styles folder. */
+    registerCustomStyle(key: string, xml: string): Promise<Availability> {
+        return this.core.registerCustomStyle(key, xml);
+    }
+
+    // Comlink makes every call async on the main-thread side, so these
+    // return promises even though the core operations are synchronous.
+    unregisterCustomStyle(key: string): Promise<void> {
+        this.core.unregisterCustomStyle(key);
+        return Promise.resolve();
+    }
+
+    clearFolderStyles(): Promise<void> {
         this.core.clearFolderStyles();
+        return Promise.resolve();
     }
 
-    async removeStyle(id: string): Promise<void> {
-        await this.ready;
-        await this.core.removeStyle(id);
+    removeStyle(id: string): Promise<void> {
+        return this.core.removeStyle(id);
     }
 
-    async registerCustomLocale(lang: string, xml: string): Promise<void> {
-        await this.ready;
+    registerCustomLocale(lang: string, xml: string): Promise<void> {
         this.core.registerCustomLocale(lang, xml);
+        return Promise.resolve();
     }
 
-    async unregisterCustomLocale(lang: string): Promise<void> {
-        await this.ready;
+    unregisterCustomLocale(lang: string): Promise<void> {
         this.core.unregisterCustomLocale(lang);
+        return Promise.resolve();
     }
 
-    async listLocales(): Promise<LocaleInfo[]> {
-        await this.ready;
+    listLocales(): Promise<LocaleInfo[]> {
         return this.core.listLocales();
     }
 
-    async ensureLocale(lang: string): Promise<boolean> {
-        await this.ready;
+    /** Fetch a locale by tag for preview; nothing is installed yet. */
+    previewLocale(lang: string): Promise<LocalePreview> {
+        return this.core.previewLocale(lang);
+    }
+
+    /** Install a previewed locale. */
+    addLocale(preview: LocalePreview): Promise<void> {
+        return this.core.addLocale(preview);
+    }
+
+    /** Refetch a downloaded locale from its recorded source URL. */
+    updateLocale(lang: string): Promise<{ updated: boolean }> {
+        return this.core.updateLocale(lang);
+    }
+
+    ensureLocale(lang: string): Promise<boolean> {
         return this.core.ensureLocale(lang);
     }
 
-    async removeLocale(lang: string): Promise<void> {
-        await this.ready;
-        await this.core.removeLocale(lang);
+    removeLocale(lang: string): Promise<void> {
+        return this.core.removeLocale(lang);
     }
 
-    async searchStyleIndex(
-        query: string,
-        limit?: number,
-    ): Promise<StyleIndexEntry[]> {
-        await this.ready;
-        return this.core.searchStyleIndex(query, limit);
-    }
-
-    async clearCache(): Promise<void> {
-        await this.ready;
-        await this.core.clearCache();
+    clearCache(): Promise<void> {
+        return this.core.clearCache();
     }
 }

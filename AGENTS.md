@@ -281,7 +281,7 @@ src/
 │       ├── general-section.ts      # Template paths, folders, toggles
 │       ├── sync-section.ts         # API key, library sync modes
 │       ├── cache-section.ts        # Cache toggle, limit, purge
-│       ├── csl-section.ts          # CSL renderer: default style/locale/format, sources, cache
+│       ├── csl-section.ts          # CSL renderer: default style/format, styles folder, cache
 │       └── webdav-section.ts       # WebDAV URL/user/password
 │
 ├── types/
@@ -321,7 +321,8 @@ src/
 │   └── modals/
 │       ├── suggest.ts              # BaseItemSearchModal + ZoteroSearchModal
 │       ├── item-picker.ts          # ItemPickerModal (extends BaseItemSearchModal)
-│       └── file-picker.ts          # FilePickerModal (local vault file picker)
+│       ├── file-picker.ts          # FilePickerModal (local vault file picker)
+│       └── csl-add-modal.ts        # AddCslStyleModal / AddCslLocaleModal (fetch-by-id preview + add)
 │
 ├── worker/
 │   ├── worker.ts                   # Worker entry point — exposes WorkerAPI via Comlink

@@ -50,7 +50,15 @@ export type Availability =
 	| { status: "missing" }
 	| { status: "invalid"; reason: string };
 
-export type StyleSource = "builtin" | "remote-cache" | "folder" | "paste";
+export type StyleSource = "builtin" | "remote-cache" | "folder";
+
+/** Provenance of a downloaded resource, kept for display and later updates. */
+export interface RemoteMeta {
+	/** Exact URL the resource was fetched from. */
+	sourceUrl: string;
+	/** Epoch ms of the last successful fetch. */
+	fetchedAt: number;
+}
 
 export interface StyleInfo {
 	/** Local key: remote styles use the slug, folder styles the file basename. */
@@ -62,6 +70,57 @@ export interface StyleInfo {
 	parent?: string;
 	/** default-locale declared by the style (or its dependent override), if any. */
 	defaultLocale?: string;
+	/** Download provenance (remote-cache styles only). */
+	remote?: RemoteMeta;
+	availability: Availability;
+}
+
+/** Rendered sample output for a style, from the Zotero previews endpoint. */
+export interface StyleSample {
+	/** Example in-text citations, HTML-encoded. */
+	citations: string[];
+	/** Example bibliography as HTML (csl-bib-body markup). */
+	bibliographyHtml: string;
+}
+
+/**
+ * Result of fetching a style for preview (before the user confirms adding
+ * it). Carries the XML so a subsequent add does not need to refetch.
+ */
+export interface StylePreview {
+	/** Slug the style will be stored under. */
+	id: string;
+	sourceUrl: string;
+	title?: string;
+	dependent: boolean;
+	/** Slug of the independent parent (dependent styles only). */
+	parent?: string;
+	defaultLocale?: string;
+	/** True when a style with this id is already installed locally. */
+	alreadyInstalled: boolean;
+	xml: string;
+	/** Rendered sample output, when the previews endpoint has one. */
+	sample?: StyleSample;
+}
+
+/** Result of fetching a locale for preview. */
+export interface LocalePreview {
+	/** Normalized BCP-47 tag, e.g. "de-DE". */
+	tag: string;
+	sourceUrl: string;
+	alreadyInstalled: boolean;
+	xml: string;
+}
+
+/** Outcome of updating a style through its dependency chain. */
+export interface StyleUpdateReport {
+	/** Chain members whose content changed. */
+	updated: string[];
+	/** Chain members refetched but identical to the cached copy. */
+	unchanged: string[];
+	/** Chain members that could not be refetched (kept as-is). */
+	failed: { id: string; reason: string }[];
+	/** Availability of the requested style after the update. */
 	availability: Availability;
 }
 

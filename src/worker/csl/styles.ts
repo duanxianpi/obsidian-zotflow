@@ -1,11 +1,9 @@
 import type { KVStore, ResourceFetcher } from "./ports";
-import type { StyleMeta, StyleSource } from "./types";
+import type { RemoteMeta, StyleMeta, StyleSource } from "./types";
 import { extractStyleMeta, slugFromStyleUri } from "./xml";
 
 const STYLE_PREFIX = "style:"; // cached remote style XML
 const STYLE_META_PREFIX = "style-meta:"; // JSON-serialized CachedMeta
-const PASTE_PREFIX = "paste:"; // pasted custom style XML (persisted)
-const PASTE_META_PREFIX = "paste-meta:";
 
 const MAX_DEPENDENT_DEPTH = 5;
 
@@ -13,11 +11,12 @@ const DEFAULT_STYLE_URL = "https://www.zotero.org/styles/{id}";
 
 interface CachedMeta extends StyleMeta {
 	invalidReason?: string;
+	remote?: RemoteMeta;
 }
 
 export interface CustomEntry {
 	xml: string;
-	source: Extract<StyleSource, "folder" | "paste">;
+	source: Extract<StyleSource, "folder">;
 	meta?: StyleMeta;
 	invalidReason?: string;
 }
@@ -27,6 +26,7 @@ export interface LocalStyle {
 	source: StyleSource;
 	meta?: StyleMeta;
 	invalidReason?: string;
+	remote?: RemoteMeta;
 }
 
 /** Successful chain resolution down to an independent style. */
@@ -51,89 +51,56 @@ export interface FailedChain {
 
 export type ChainResult = ResolvedChain | FailedChain;
 
+/** Per-member outcome of a chain update (see updateChain). */
+export interface ChainUpdateResult {
+	updated: string[];
+	unchanged: string[];
+	failed: { id: string; reason: string }[];
+}
+
 /**
- * Style storage and dependent-chain resolution. Custom styles (vault folder,
- * pasted XML) always take precedence over cached remote styles with the same
- * id — that is the point of a user override.
+ * Style storage and dependent-chain resolution. Custom styles (vault folder)
+ * always take precedence over cached remote styles with the same id — that
+ * is the point of a user override.
  */
 export class StyleRepository {
 	private custom = new Map<string, CustomEntry>();
-	private styleUrlTemplate = DEFAULT_STYLE_URL;
+	private styleUrlTemplate: string;
 
 	constructor(
 		private fetcher: ResourceFetcher,
-		private store: KVStore
-	) {}
-
-	setUrlTemplate(template: string): void {
-		this.styleUrlTemplate = template || DEFAULT_STYLE_URL;
+		private store: KVStore,
+		styleUrlTemplate?: string
+	) {
+		this.styleUrlTemplate = styleUrlTemplate || DEFAULT_STYLE_URL;
 	}
 
 	styleUrl(id: string): string {
 		return this.styleUrlTemplate.replace("{id}", id);
 	}
 
-	/** Load persisted pasted styles into memory. Call once at startup. */
-	async init(): Promise<void> {
-		for (const key of await this.store.list(PASTE_PREFIX)) {
-			const id = key.slice(PASTE_PREFIX.length);
-			const xml = await this.store.get(key);
-			if (xml === null) continue;
-			const metaRaw = await this.store.get(PASTE_META_PREFIX + id);
-			const meta = metaRaw
-				? (JSON.parse(metaRaw) as CachedMeta)
-				: ({} as CachedMeta);
-			this.custom.set(id, {
-				xml,
-				source: "paste",
-				meta: meta.invalidReason ? undefined : meta,
-				invalidReason: meta.invalidReason,
-			});
-		}
-	}
-
 	/**
-	 * Register a custom style under a local key. Invalid XML is still
+	 * Register a folder style under a local key. Invalid XML is still
 	 * registered (so panels can surface it as invalid) but flagged.
 	 */
-	async registerCustom(
-		key: string,
-		xml: string,
-		source: "folder" | "paste"
-	): Promise<CustomEntry> {
+	registerCustom(key: string, xml: string): CustomEntry {
 		let entry: CustomEntry;
 		try {
-			entry = { xml, source, meta: extractStyleMeta(xml) };
+			entry = { xml, source: "folder", meta: extractStyleMeta(xml) };
 		} catch (e) {
-			entry = { xml, source, invalidReason: (e as Error).message };
+			entry = { xml, source: "folder", invalidReason: (e as Error).message };
 		}
 		this.custom.set(key, entry);
-		if (source === "paste") {
-			await this.store.set(PASTE_PREFIX + key, xml);
-			await this.store.set(
-				PASTE_META_PREFIX + key,
-				JSON.stringify(
-					entry.meta ?? { dependent: false, invalidReason: entry.invalidReason }
-				)
-			);
-		}
 		return entry;
 	}
 
-	async unregisterCustom(key: string): Promise<void> {
-		const entry = this.custom.get(key);
+	unregisterCustom(key: string): void {
 		this.custom.delete(key);
-		if (entry?.source === "paste") {
-			await this.store.delete(PASTE_PREFIX + key);
-			await this.store.delete(PASTE_META_PREFIX + key);
-		}
 	}
 
 	/** Remove all folder-sourced custom styles (before a folder re-scan). */
 	clearFolderStyles(): void {
-		for (const [key, entry] of this.custom) {
-			if (entry.source === "folder") this.custom.delete(key);
-		}
+		this.custom.clear();
 	}
 
 	customKeys(): string[] {
@@ -144,7 +111,7 @@ export class StyleRepository {
 		return this.custom.get(key);
 	}
 
-	/** Look up a style locally: custom (folder > paste) first, then remote cache. */
+	/** Look up a style locally: folder styles first, then remote cache. */
 	async getLocal(id: string): Promise<LocalStyle | null> {
 		const custom = this.custom.get(id);
 		if (custom) return custom;
@@ -160,15 +127,30 @@ export class StyleRepository {
 			source: "remote-cache",
 			meta: meta?.invalidReason ? undefined : meta,
 			invalidReason: meta?.invalidReason,
+			remote: meta?.remote,
 		};
 	}
 
-	/** Fetch a style from the remote source and cache it. Throws on failure. */
-	async fetchAndCache(id: string): Promise<LocalStyle> {
-		const xml = await this.fetcher.fetchText(this.styleUrl(id));
+	/**
+	 * Fetch a style and cache it together with its provenance. `sourceUrl`
+	 * defaults to the standard zotero.org location for the slug. Throws on
+	 * failure.
+	 */
+	async fetchAndCache(id: string, sourceUrl?: string): Promise<LocalStyle> {
+		const url = sourceUrl ?? this.styleUrl(id);
+		const xml = await this.fetcher.fetchText(url);
 		if (!xml.includes("<style")) {
 			throw new Error(`response for style "${id}" does not look like CSL XML`);
 		}
+		return this.cacheFetched(id, url, xml);
+	}
+
+	/** Persist an already-fetched style (preview flow: fetch once, add later). */
+	async cacheFetched(
+		id: string,
+		sourceUrl: string,
+		xml: string
+	): Promise<LocalStyle> {
 		let meta: StyleMeta | undefined;
 		let invalidReason: string | undefined;
 		try {
@@ -176,25 +158,25 @@ export class StyleRepository {
 		} catch (e) {
 			invalidReason = (e as Error).message;
 		}
+		const remote: RemoteMeta = { sourceUrl, fetchedAt: Date.now() };
 		await this.store.set(STYLE_PREFIX + id, xml);
 		await this.store.set(
 			STYLE_META_PREFIX + id,
-			JSON.stringify({ ...(meta ?? { dependent: false }), invalidReason })
+			JSON.stringify({
+				...(meta ?? { dependent: false }),
+				invalidReason,
+				remote,
+			})
 		);
-		return { xml, source: "remote-cache", meta, invalidReason };
+		return { xml, source: "remote-cache", meta, invalidReason, remote };
 	}
 
-	/** Remove a cached remote or pasted style. Folder styles are files; not removable here. */
+	/** Remove a cached remote style. Folder styles are files; not removable here. */
 	async remove(id: string): Promise<void> {
-		const custom = this.custom.get(id);
-		if (custom) {
-			if (custom.source === "folder") {
-				throw new Error(
-					`"${id}" comes from the styles folder; delete the file instead`
-				);
-			}
-			await this.unregisterCustom(id);
-			return;
+		if (this.custom.has(id)) {
+			throw new Error(
+				`"${id}" comes from the styles folder; delete the file instead`
+			);
 		}
 		await this.store.delete(STYLE_PREFIX + id);
 		await this.store.delete(STYLE_META_PREFIX + id);
@@ -243,7 +225,8 @@ export class StyleRepository {
 					failure: { status: "invalid", reason: (e as Error).message },
 				};
 			}
-			current = { xml: opts.xml, source: "paste", meta };
+			// Source label is irrelevant here: this entry never leaves resolveChain.
+			current = { xml: opts.xml, source: "folder", meta };
 		} else {
 			current = await this.getLocal(currentId);
 			if (!current) {
@@ -331,5 +314,56 @@ export class StyleRepository {
 				reason: `dependent style chain exceeds depth ${MAX_DEPENDENT_DEPTH} (possible cycle)`,
 			},
 		};
+	}
+
+	/**
+	 * Refetch a style and every member of its dependent chain from their
+	 * recorded source URLs. Folder chain members are skipped — they are
+	 * user-owned files — but the walk continues through them. A member
+	 * that fails to refetch keeps its cached copy and the walk continues
+	 * along that copy's parent link.
+	 */
+	async updateChain(id: string): Promise<ChainUpdateResult> {
+		const result: ChainUpdateResult = {
+			updated: [],
+			unchanged: [],
+			failed: [],
+		};
+		const visited = new Set<string>();
+		let currentId = id;
+
+		for (let depth = 0; depth <= MAX_DEPENDENT_DEPTH; depth++) {
+			if (visited.has(currentId)) break; // cycle — availability reports it
+			visited.add(currentId);
+
+			let entry = await this.getLocal(currentId);
+
+			if (!entry || entry.source === "remote-cache") {
+				const url = entry?.remote?.sourceUrl ?? this.styleUrl(currentId);
+				try {
+					const old = entry?.xml;
+					entry = await this.fetchAndCache(currentId, url);
+					(entry.xml === old ? result.unchanged : result.updated).push(
+						currentId
+					);
+				} catch (e) {
+					result.failed.push({
+						id: currentId,
+						reason: (e as Error).message,
+					});
+					if (!entry) return result; // nothing cached to walk through
+				}
+			}
+			// folder styles: leave untouched, but still follow their parent
+
+			const parent =
+				entry.meta?.dependent && entry.meta.parent
+					? slugFromStyleUri(entry.meta.parent)
+					: undefined;
+			if (!parent) break;
+			currentId = parent;
+		}
+
+		return result;
 	}
 }

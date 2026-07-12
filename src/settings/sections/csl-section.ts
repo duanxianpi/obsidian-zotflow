@@ -6,18 +6,6 @@ import type ZotFlow from "main";
 import type { CslOutputFormat } from "settings/types";
 import type { StyleInfo } from "worker/csl";
 
-const STYLE_SOURCE_PRESETS: Record<string, string> = {
-    zotero: "https://www.zotero.org/styles/{id}",
-    jsdelivr:
-        "https://cdn.jsdelivr.net/gh/citation-style-language/styles/{id}.csl",
-};
-
-const LOCALE_SOURCE_PRESETS: Record<string, string> = {
-    github: "https://raw.githubusercontent.com/citation-style-language/locales/master/locales-{lang}.xml",
-    jsdelivr:
-        "https://cdn.jsdelivr.net/gh/citation-style-language/locales/locales-{lang}.xml",
-};
-
 const FORMAT_LABELS: Record<CslOutputFormat, string> = {
     text: "Plain text",
     html: "HTML",
@@ -33,7 +21,7 @@ function isSupported(style: StyleInfo): boolean {
     );
 }
 
-/** Settings section for the CSL renderer (styles, locales, sources, cache). */
+/** Settings section for the CSL renderer (defaults, styles folder, cache). */
 export class CslSection {
     constructor(
         private plugin: ZotFlow,
@@ -43,7 +31,6 @@ export class CslSection {
     async render(containerEl: HTMLElement): Promise<void> {
         this.renderRendering(containerEl);
         this.renderCustomStyles(containerEl);
-        this.renderSources(containerEl);
         this.renderCache(containerEl);
     }
 
@@ -92,23 +79,6 @@ export class CslSection {
                         this.plugin.settings.cslDefaultStyleId = value;
                         await this.plugin.saveSettings();
                     });
-                });
-        });
-
-        group.addSetting((setting) => {
-            setting
-                .setName("Default Locale")
-                .setDesc(
-                    "BCP-47 tag, e.g. en-US, de-DE, zh-CN. Non-English locales are downloaded on first use and cached.",
-                )
-                .addText((text) => {
-                    text.setPlaceholder("en-US")
-                        .setValue(this.plugin.settings.cslDefaultLocale)
-                        .onChange(async (value) => {
-                            this.plugin.settings.cslDefaultLocale =
-                                value.trim() || "en-US";
-                            await this.plugin.saveSettings();
-                        });
                 });
         });
 
@@ -171,85 +141,6 @@ export class CslSection {
         });
     }
 
-    private renderSources(containerEl: HTMLElement) {
-        const group = new SettingGroup(containerEl);
-        group.setHeading("Sources");
-
-        group.addSetting((setting) => {
-            setting
-                .setName("Style download source")
-                .setDesc(
-                    "Where style XML is fetched from. {id} is replaced with the style id.",
-                )
-                .addDropdown((dropdown) => {
-                    const current = this.plugin.settings.cslStyleUrlTemplate;
-                    const preset =
-                        Object.entries(STYLE_SOURCE_PRESETS).find(
-                            ([, v]) => v === current,
-                        )?.[0] ?? "custom";
-                    dropdown
-                        .addOption("zotero", "zotero.org")
-                        .addOption("jsdelivr", "jsDelivr (CSL GitHub mirror)")
-                        .addOption("custom", "Custom URL template")
-                        .setValue(preset)
-                        .onChange(async (value) => {
-                            if (value === "custom") return;
-                            this.plugin.settings.cslStyleUrlTemplate =
-                                STYLE_SOURCE_PRESETS[value] as string;
-                            await this.plugin.saveSettings();
-                            this.refreshUI();
-                        });
-                })
-                .addText((text) => {
-                    text.setPlaceholder("https://…/{id}")
-                        .setValue(this.plugin.settings.cslStyleUrlTemplate)
-                        .onChange(async (value) => {
-                            if (!value.includes("{id}")) return;
-                            this.plugin.settings.cslStyleUrlTemplate =
-                                value.trim();
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
-
-        group.addSetting((setting) => {
-            setting
-                .setName("Locale download source")
-                .setDesc(
-                    "Where locale XML is fetched from. {lang} is replaced with the locale tag.",
-                )
-                .addDropdown((dropdown) => {
-                    const current = this.plugin.settings.cslLocaleUrlTemplate;
-                    const preset =
-                        Object.entries(LOCALE_SOURCE_PRESETS).find(
-                            ([, v]) => v === current,
-                        )?.[0] ?? "custom";
-                    dropdown
-                        .addOption("github", "GitHub (CSL locales repo)")
-                        .addOption("jsdelivr", "jsDelivr")
-                        .addOption("custom", "Custom URL template")
-                        .setValue(preset)
-                        .onChange(async (value) => {
-                            if (value === "custom") return;
-                            this.plugin.settings.cslLocaleUrlTemplate =
-                                LOCALE_SOURCE_PRESETS[value] as string;
-                            await this.plugin.saveSettings();
-                            this.refreshUI();
-                        });
-                })
-                .addText((text) => {
-                    text.setPlaceholder("https://…/locales-{lang}.xml")
-                        .setValue(this.plugin.settings.cslLocaleUrlTemplate)
-                        .onChange(async (value) => {
-                            if (!value.includes("{lang}")) return;
-                            this.plugin.settings.cslLocaleUrlTemplate =
-                                value.trim();
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
-    }
-
     private renderCache(containerEl: HTMLElement) {
         const group = new SettingGroup(containerEl);
         group.setHeading("Cache");
@@ -258,7 +149,7 @@ export class CslSection {
             setting
                 .setName("Clear cache")
                 .setDesc(
-                    "Remove all downloaded styles, locales and the style index. Pasted and folder styles are kept.",
+                    "Remove all downloaded styles and locales. Styles from the custom styles folder are kept.",
                 )
                 .addButton((btn) => {
                     btn.setButtonText("Clear cache")

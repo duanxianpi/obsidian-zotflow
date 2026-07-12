@@ -207,14 +207,12 @@ function makeService(routes = {}) {
         store: new MemoryKVStore(),
         styleUrlTemplate: "style://{id}",
         localeUrlTemplate: "locale://{lang}",
-        styleIndexUrl: "index://styles",
     });
     return { service, fetcher };
 }
 
 await test("APA bibliography: (n.d.), author order, plain text", async () => {
     const { service } = makeService();
-    await service.init();
     const [entry] = await service.renderBibliography([ITEMS.vaswaniNoDate], {
         styleXml: apa,
         format: "text",
@@ -229,7 +227,6 @@ await test("APA bibliography: (n.d.), author order, plain text", async () => {
 
 await test("IEEE numbered style flattens to [n] entry", async () => {
     const { service } = makeService();
-    await service.init();
     const entries = await service.renderBibliography(
         [ITEMS.doe2020, ITEMS.roe2021],
         { styleXml: ieee, format: "text" },
@@ -241,7 +238,6 @@ await test("IEEE numbered style flattens to [n] entry", async () => {
 
 await test("HTML format: wrappers kept, strip option flattens", async () => {
     const { service } = makeService();
-    await service.init();
     const [kept] = await service.renderBibliography([ITEMS.doe2020], {
         styleXml: apa,
         format: "html",
@@ -258,7 +254,6 @@ await test("HTML format: wrappers kept, strip option flattens", async () => {
 
 await test("markdown format: italics + escaping", async () => {
     const { service } = makeService();
-    await service.init();
     const [entry] = await service.renderBibliography([ITEMS.doe2020], {
         styleXml: apa,
         format: "markdown",
@@ -270,7 +265,6 @@ await test("markdown format: italics + escaping", async () => {
 
 await test("citation clusters", async () => {
     const { service } = makeService();
-    await service.init();
     const cite = await service.renderCitation(
         [ITEMS.doe2020, ITEMS.roe2021],
         { styleXml: apa, format: "text" },
@@ -280,7 +274,6 @@ await test("citation clusters", async () => {
 
 await test("remote style fetched once, then served from cache", async () => {
     const { service, fetcher } = makeService({ "style://apa": apa });
-    await service.init();
     const avail = await service.ensureStyle("apa");
     check(avail.status === "ready", "ensureStyle -> ready");
     await service.renderBibliography([ITEMS.doe2020], { styleId: "apa" });
@@ -301,7 +294,6 @@ await test("dependent style resolves through its parent", async () => {
         "style://nature": nature,
         "locale://en-GB": enUS, // stand-in body for en-GB
     });
-    await service.init();
     const avail = await service.ensureStyle("nature-neuroscience");
     check(avail.status === "ready", "dependent chain closes");
     const [entry] = await service.renderBibliography([ITEMS.doe2020], {
@@ -312,7 +304,6 @@ await test("dependent style resolves through its parent", async () => {
 
 await test("unresolved parent -> structured error, no broken output", async () => {
     const { service } = makeService({ "style://orphan": ORPHAN_DEPENDENT });
-    await service.init();
     const avail = await service.ensureStyle("orphan");
     check(avail.status === "unresolved-parent", "availability status");
     check(avail.parent === "does-not-exist-parent", "missing parent named");
@@ -334,7 +325,6 @@ await test("dependent cycle detected as invalid (no infinite loop)", async () =>
         "style://cycle-a": CYCLE_A,
         "style://cycle-b": CYCLE_B,
     });
-    await service.init();
     const avail = await service.ensureStyle("cycle-a");
     check(avail.status === "invalid", "cycle -> invalid");
     check(/cycle/i.test(avail.reason || ""), "reason mentions the cycle");
@@ -345,7 +335,6 @@ await test("locales: lazy load, cache, unresolved-locale", async () => {
         "style://apa": apa,
         "locale://de-DE": deDE,
     });
-    await service.init();
     await service.renderBibliography([ITEMS.doe2020], {
         styleId: "apa",
         locale: "de-DE",
@@ -387,26 +376,19 @@ await test("locales: lazy load, cache, unresolved-locale", async () => {
 
 await test("custom styles: folder overrides remote, invalid flagged", async () => {
     const { service } = makeService({ "style://apa": apa });
-    await service.init();
     await service.ensureStyle("apa");
     // Register IEEE under the id "apa": the folder version must win.
-    const avail = await service.registerCustomStyle("apa", ieee, {
-        source: "folder",
-    });
+    const avail = await service.registerCustomStyle("apa", ieee);
     check(avail.status === "ready", "folder style ready");
     const [entry] = await service.renderBibliography([ITEMS.doe2020], {
         styleId: "apa",
     });
     check(/^\[1\] /.test(entry), "folder style shadows remote (IEEE output)");
 
-    const bad = await service.registerCustomStyle("broken", "<style>oops", {
-        source: "folder",
-    });
+    const bad = await service.registerCustomStyle("broken", "<style>oops");
     check(bad.status === "invalid", "broken XML flagged invalid at registration");
 
-    const orphan = await service.registerCustomStyle("orphan", ORPHAN_DEPENDENT, {
-        source: "folder",
-    });
+    const orphan = await service.registerCustomStyle("orphan", ORPHAN_DEPENDENT);
     check(
         orphan.status === "unresolved-parent",
         "dependent custom style with unreachable parent flagged",
@@ -415,7 +397,6 @@ await test("custom styles: folder overrides remote, invalid flagged", async () =
 
 await test("multi-context disambiguation isolation + pool reset", async () => {
     const { service } = makeService();
-    await service.init();
 
     const ctxA = await service.createContext({ styleXml: apa, format: "text" });
     ctxA.registerItems([ITEMS.johnSmith]);
@@ -449,6 +430,161 @@ await test("multi-context disambiguation isolation + pool reset", async () => {
         "pooled engine fully reset",
     );
     ctxC.dispose();
+});
+
+await test("preview + add: provenance recorded, chain + locale auto-added", async () => {
+    const { service } = makeService({
+        "style://nature-neuroscience": natureNeuro,
+        "style://nature": nature,
+        "locale://en-GB": enUS, // stand-in body for en-GB
+    });
+
+    const preview = await service.previewStyle("nature-neuroscience");
+    check(preview.id === "nature-neuroscience", "preview id from input");
+    check(preview.dependent === true, "preview reports dependent");
+    check(preview.parent === "nature", "preview names the parent");
+    check(
+        preview.sourceUrl === "style://nature-neuroscience",
+        "preview carries the source url",
+    );
+    check(preview.alreadyInstalled === false, "not installed before add");
+    check((await service.listStyles()).length === 0, "preview caches nothing");
+
+    const avail = await service.addStyle(preview);
+    check(avail.status === "ready", "addStyle closes the chain");
+
+    const styles = await service.listStyles();
+    const leaf = styles.find((s) => s.id === "nature-neuroscience");
+    const parent = styles.find((s) => s.id === "nature");
+    check(
+        leaf?.remote?.sourceUrl === "style://nature-neuroscience",
+        "leaf records its source url",
+    );
+    check(typeof leaf?.remote?.fetchedAt === "number", "leaf records fetchedAt");
+    check(
+        parent?.remote?.sourceUrl === "style://nature",
+        "auto-fetched parent records its source url",
+    );
+
+    const locales = await service.listLocales();
+    const enGB = locales.find((l) => l.tag === "en-GB");
+    check(
+        enGB?.source === "remote-cache" && enGB.sourceUrl === "locale://en-GB",
+        "style default locale auto-added with provenance",
+    );
+});
+
+await test("updateStyle refetches the whole dependency chain", async () => {
+    const routes = {
+        "style://nature-neuroscience": natureNeuro,
+        "style://nature": nature,
+        "locale://en-GB": enUS,
+    };
+    const { service, fetcher } = makeService(routes);
+    await service.addStyle(await service.previewStyle("nature-neuroscience"));
+
+    // Upstream revises the parent; the leaf is unchanged. (A whitespace-only
+    // change keeps the fixture parseable but alters the cached text.)
+    fetcher.routes["style://nature"] = nature.replace("<style", "<style  ");
+    const report = await service.updateStyle("nature-neuroscience");
+    check(report.updated.includes("nature"), "parent detected as updated");
+    check(
+        report.unchanged.includes("nature-neuroscience"),
+        "unchanged leaf reported as such",
+    );
+    check(report.failed.length === 0, "no failures");
+    check(report.availability.status === "ready", "still ready after update");
+
+    let threw = false;
+    try {
+        await service.registerCustomStyle("my-folder-style", ieee);
+        await service.updateStyle("my-folder-style");
+    } catch {
+        threw = true;
+    }
+    check(threw, "updateStyle refuses styles without a source url");
+});
+
+await test("locale preview/add/update with provenance", async () => {
+    const { service, fetcher } = makeService({ "locale://de-DE": deDE });
+
+    const preview = await service.previewLocale("de"); // bare tag normalizes
+    check(preview.tag === "de-DE", "tag normalized in preview");
+    check(preview.sourceUrl === "locale://de-DE", "preview carries source url");
+    await service.addLocale(preview);
+
+    const locales = await service.listLocales();
+    const de = locales.find((l) => l.tag === "de-DE");
+    check(
+        de?.source === "remote-cache" && de.sourceUrl === "locale://de-DE",
+        "added locale records provenance",
+    );
+
+    check(
+        (await service.updateLocale("de-DE")).updated === false,
+        "unchanged locale reports updated: false",
+    );
+    fetcher.routes["locale://de-DE"] = deDE.replace("<locale", "<locale  ");
+    check(
+        (await service.updateLocale("de-DE")).updated === true,
+        "changed locale reports updated: true",
+    );
+    let threw = false;
+    try {
+        await service.updateLocale("fr-FR");
+    } catch {
+        threw = true;
+    }
+    check(threw, "updateLocale refuses locales that were never downloaded");
+});
+
+await test("style preview: rendered sample fetched when available", async () => {
+    const sampleJson = JSON.stringify({
+        citation: ["(Doe, 2020)", "(Roe, 2021)"],
+        bibliography:
+            '<div class="csl-bib-body"><div class="csl-entry">Doe, J. (2020).</div></div>',
+    });
+    const fetcher = new StubFetcher({
+        "style://apa": apa,
+        "sample://apa": sampleJson,
+        "style://nature-neuroscience": natureNeuro,
+        "sample://dependent/nature-neuroscience": sampleJson,
+    });
+    const service = new CslRenderService({
+        fetcher,
+        store: new MemoryKVStore(),
+        styleUrlTemplate: "style://{id}",
+        localeUrlTemplate: "locale://{lang}",
+        styleSampleUrlTemplate: "sample://{path}",
+    });
+
+    const independent = await service.previewStyle("apa");
+    check(
+        independent.sample?.citations.length === 2,
+        "independent style sample citations",
+    );
+    check(
+        independent.sample?.bibliographyHtml.includes("csl-bib-body") === true,
+        "independent style sample bibliography",
+    );
+
+    const dependent = await service.previewStyle("nature-neuroscience");
+    check(
+        dependent.sample?.bibliographyHtml.includes("csl-bib-body") === true,
+        "dependent style sample found under dependent/",
+    );
+
+    // No sample published: preview still succeeds, sample is undefined.
+    const bare = new StubFetcher({ "style://apa": apa });
+    const bareService = new CslRenderService({
+        fetcher: bare,
+        store: new MemoryKVStore(),
+        styleUrlTemplate: "style://{id}",
+        localeUrlTemplate: "locale://{lang}",
+        styleSampleUrlTemplate: "sample://{path}",
+    });
+    const noSample = await bareService.previewStyle("apa");
+    check(noSample.sample === undefined, "missing sample tolerated");
 });
 
 /* ---------------------------------------------------------------- */

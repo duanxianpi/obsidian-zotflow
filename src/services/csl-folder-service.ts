@@ -53,7 +53,6 @@ export class CslFolderService {
             await workerBridge.cslRender.registerCustomStyle(
                 file.basename,
                 xml,
-                "folder",
             );
             return;
         }

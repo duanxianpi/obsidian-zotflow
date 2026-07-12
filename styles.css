@@ -2136,31 +2136,64 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
 .zotflow-csl-view {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 4px 0;
+    gap: var(--size-4-4);
+    height: 100%;
+    overflow: hidden;
+}
+
+.zotflow-csl-section {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.zotflow-csl-section--styles {
+    flex: 1 1 auto;
+}
+
+.zotflow-csl-section--locales {
+    flex: 0 1 auto;
+    max-height: 40%;
 }
 
 .zotflow-csl-section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-weight: 600;
-    margin-top: 8px;
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--size-4-1);
+    flex-shrink: 0;
 }
 
 .zotflow-csl-list {
     border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-m);
-    padding: 4px 8px;
-    max-height: 260px;
+    border-radius: var(--radius-s);
+    padding: var(--size-2-1) var(--size-4-2);
     overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.zotflow-csl-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--size-4-8) 0;
+    color: var(--text-faint);
+    gap: var(--size-4-2);
+    font-size: var(--font-ui-small);
 }
 
 .zotflow-csl-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 0;
+    gap: var(--size-4-2);
+    padding: var(--size-4-2) 0;
     border-bottom: 1px solid var(--background-modifier-border);
 }
 
@@ -2174,6 +2207,7 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
 }
 
 .zotflow-csl-row-title {
+    font-size: var(--font-ui-small);
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2216,45 +2250,145 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     font-size: var(--font-ui-smaller);
 }
 
-.zotflow-csl-add-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    border: 1px dashed var(--background-modifier-border);
-    border-radius: var(--radius-m);
-    padding: 8px;
-}
+/* ── Add style / locale modals ── */
 
-.zotflow-csl-add-panel input[type="text"],
-.zotflow-csl-add-panel textarea {
-    width: 100%;
-}
-
-.zotflow-csl-add-panel textarea {
-    font-family: var(--font-monospace);
-}
-
-.zotflow-csl-add-locale {
-    flex-direction: row;
-    align-items: center;
-}
-
-.zotflow-csl-add-locale input[type="text"] {
-    flex: 1;
-}
-
-.zotflow-csl-search-results {
-    max-height: 180px;
-}
-
-.zotflow-csl-paste summary {
-    cursor: pointer;
-    color: var(--text-muted);
+.zotflow-csl-add-modal .zotflow-csl-modal-card {
+    margin: var(--size-4-2) 0;
+    padding: var(--size-4-2) var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
     font-size: var(--font-ui-small);
 }
 
-.zotflow-csl-paste {
+.zotflow-csl-modal-card-heading {
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--size-4-1);
+}
+
+.zotflow-csl-modal-row {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    align-items: baseline;
+    gap: var(--size-4-2);
+    padding: 2px 0;
+    overflow-wrap: anywhere;
+}
+
+.zotflow-csl-modal-label {
+    flex-shrink: 0;
+    width: 7.5em;
+    color: var(--text-muted);
+}
+
+.zotflow-csl-modal-value {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Skeleton bars keep the modal footprint before/while fetching. */
+.zotflow-csl-skeleton {
+    display: inline-block;
+    height: 0.85em;
+    border-radius: var(--radius-s);
+    background-color: var(--background-modifier-hover);
+    vertical-align: middle;
+}
+
+.zotflow-csl-skeleton--w35 {
+    width: 35%;
+}
+
+.zotflow-csl-skeleton--w50 {
+    width: 50%;
+}
+
+.zotflow-csl-skeleton--w60 {
+    width: 60%;
+}
+
+.zotflow-csl-skeleton--w70 {
+    width: 70%;
+}
+
+.zotflow-csl-skeleton--w80 {
+    width: 80%;
+}
+
+.zotflow-csl-add-modal.is-loading .zotflow-csl-skeleton {
+    animation: zotflow-csl-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes zotflow-csl-skeleton-pulse {
+    0%,
+    100% {
+        opacity: 0.45;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+.zotflow-csl-modal-notice:empty {
+    display: none;
+}
+
+.zotflow-csl-modal-warning {
+    margin: var(--size-4-1) 0;
+    color: var(--text-warning);
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-csl-modal-error {
+    margin: var(--size-4-1) 0;
+    color: var(--text-error);
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-csl-modal-citation {
+    color: var(--text-muted);
+    margin-bottom: var(--size-4-2);
+}
+
+.zotflow-csl-modal-bib {
+    max-height: 200px;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+/* The sample ships csl-bib-body markup; keep entries compact. */
+.zotflow-csl-modal-bib .csl-entry {
+    margin-bottom: var(--size-4-1);
+}
+
+.zotflow-csl-modal-buttons .setting-item-control {
+    justify-content: flex-end;
+}
+
+/* ── Responsive (mirrors the Activity Center breakpoints) ── */
+
+@media (max-width: 600px) {
+    .zotflow-csl-section--locales {
+        max-height: 45%;
+    }
+
+    /* Rows wrap: info takes the full first line, actions drop below. */
+    .zotflow-csl-row {
+        flex-wrap: wrap;
+        row-gap: var(--size-4-1);
+    }
+
+    .zotflow-csl-row-info {
+        flex: 1 1 100%;
+    }
+
+    .zotflow-csl-modal-label {
+        width: 6em;
+    }
+
+    .zotflow-csl-modal-bib {
+        max-height: 140px;
+    }
 }

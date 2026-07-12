@@ -6,11 +6,7 @@
  */
 
 export { CslRenderService } from "./api";
-export type {
-	CslRenderServiceConfig,
-	LocaleInfo,
-	StyleIndexEntry,
-} from "./api";
+export type { CslRenderServiceConfig, LocaleInfo } from "./api";
 export type { BibliographyContext } from "./context";
 export { UnavailableStyleError, describeAvailability } from "./errors";
 export { normalizeLocale } from "./locales";
@@ -20,10 +16,15 @@ export type {
 	Availability,
 	CiteProps,
 	CSLItem,
+	LocalePreview,
 	OutputFormat,
+	RemoteMeta,
 	RenderOptions,
 	StyleInfo,
 	StyleMeta,
+	StylePreview,
+	StyleSample,
 	StyleSource,
+	StyleUpdateReport,
 } from "./types";
 export { extractStyleMeta, slugFromStyleUri } from "./xml";

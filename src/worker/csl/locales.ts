@@ -1,8 +1,10 @@
-﻿import CSL from "citeproc";
+import CSL from "citeproc";
 import { LOCALE_EN_US } from "./assets/locale-en-US";
 import type { KVStore, ResourceFetcher } from "./ports";
+import type { RemoteMeta } from "./types";
 
 const KEY_PREFIX = "locale:";
+const META_PREFIX = "locale-meta:"; // JSON-serialized RemoteMeta
 
 /**
  * Normalize a requested language tag to the canonical locale file name used by
@@ -34,7 +36,7 @@ const DEFAULT_LOCALE_URL =
 
 /**
  * Locale registry: bundled en-US, custom-registered locales (from the vault
- * folder), a persistent KV cache, and a remote fetch fallback â€” in that order.
+ * folder), a persistent KV cache, and a remote fetch fallback — in that order.
  */
 export class LocaleStore {
 	private memory = new Map<string, string>();
@@ -50,8 +52,8 @@ export class LocaleStore {
 		this.memory.set("en-US", LOCALE_EN_US);
 	}
 
-	setUrlTemplate(template: string): void {
-		this.urlTemplate = template || DEFAULT_LOCALE_URL;
+	localeUrl(lang: string): string {
+		return this.urlTemplate.replace("{lang}", normalizeLocale(lang));
 	}
 
 	/** Register a locale XML provided by the platform (e.g. vault folder). */
@@ -78,6 +80,18 @@ export class LocaleStore {
 		return (await this.store.get(KEY_PREFIX + norm)) !== null;
 	}
 
+	/** Persist a fetched locale together with its provenance. */
+	async cacheFetched(
+		norm: string,
+		sourceUrl: string,
+		xml: string
+	): Promise<void> {
+		this.memory.set(norm, xml);
+		await this.store.set(KEY_PREFIX + norm, xml);
+		const meta: RemoteMeta = { sourceUrl, fetchedAt: Date.now() };
+		await this.store.set(META_PREFIX + norm, JSON.stringify(meta));
+	}
+
 	/**
 	 * Ensure the locale is loaded into memory: custom > memory > KV cache >
 	 * network. Returns true on success, false if it cannot be obtained.
@@ -93,16 +107,46 @@ export class LocaleStore {
 		}
 
 		try {
-			const xml = await this.fetcher.fetchText(
-				this.urlTemplate.replace("{lang}", norm)
-			);
+			const url = this.localeUrl(norm);
+			const xml = await this.fetcher.fetchText(url);
 			// Reject obviously-wrong payloads (error pages, empty bodies).
 			if (!xml.includes("<locale")) return false;
-			this.memory.set(norm, xml);
-			await this.store.set(KEY_PREFIX + norm, xml);
+			await this.cacheFetched(norm, url, xml);
 			return true;
 		} catch {
 			return false;
+		}
+	}
+
+	/**
+	 * Refetch a cached locale from its recorded source URL. Returns whether
+	 * the content changed. Throws when the refetch fails (the cached copy is
+	 * kept) or when the locale is not a downloaded one.
+	 */
+	async update(lang: string): Promise<{ updated: boolean }> {
+		const norm = normalizeLocale(lang);
+		const old = await this.store.get(KEY_PREFIX + norm);
+		if (old === null) {
+			throw new Error(`locale "${norm}" is not a downloaded locale`);
+		}
+		const meta = await this.getMeta(norm);
+		const url = meta?.sourceUrl ?? this.localeUrl(norm);
+		const xml = await this.fetcher.fetchText(url);
+		if (!xml.includes("<locale")) {
+			throw new Error(`response for locale "${norm}" does not look like locale XML`);
+		}
+		await this.cacheFetched(norm, url, xml);
+		return { updated: xml !== old };
+	}
+
+	/** Provenance of a downloaded locale, if recorded. */
+	async getMeta(lang: string): Promise<RemoteMeta | null> {
+		const raw = await this.store.get(META_PREFIX + normalizeLocale(lang));
+		if (raw === null) return null;
+		try {
+			return JSON.parse(raw) as RemoteMeta;
+		} catch {
+			return null;
 		}
 	}
 
@@ -122,12 +166,15 @@ export class LocaleStore {
 		const norm = normalizeLocale(lang);
 		if (norm === "en-US") return;
 		await this.store.delete(KEY_PREFIX + norm);
+		await this.store.delete(META_PREFIX + norm);
 		this.memory.delete(norm);
 	}
 
 	async clearCache(): Promise<void> {
-		for (const key of await this.store.list(KEY_PREFIX)) {
-			await this.store.delete(key);
+		for (const prefix of [KEY_PREFIX, META_PREFIX]) {
+			for (const key of await this.store.list(prefix)) {
+				await this.store.delete(key);
+			}
 		}
 		this.memory.clear();
 		this.memory.set("en-US", LOCALE_EN_US);

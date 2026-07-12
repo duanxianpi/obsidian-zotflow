@@ -265,7 +265,7 @@ const exposedApi: WorkerAPI = {
             );
             _key = new KeyService(_zotero, parentHost);
 
-            _cslRender = new CslRenderWorkerService(settings, parentHost);
+            _cslRender = new CslRenderWorkerService(settings);
 
             _taskManager = new TaskManager(parentHost);
 

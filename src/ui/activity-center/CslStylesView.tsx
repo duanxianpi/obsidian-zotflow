@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useState } from "react";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { ObsidianIcon } from "ui/ObsidianIcon";
+import { AddCslLocaleModal, AddCslStyleModal } from "ui/modals/csl-add-modal";
 
 import type {
     Availability,
     LocaleInfo,
-    StyleIndexEntry,
     StyleInfo,
+    StyleUpdateReport,
 } from "worker/csl";
 
 type BadgeKind = "ready" | "resolvable" | "unavailable";
@@ -45,24 +46,28 @@ const Badge: React.FC<{ availability: Availability }> = ({ availability }) => {
     );
 };
 
+function fmtDate(ms: number): string {
+    return new Date(ms).toLocaleDateString();
+}
+
+function updateSummary(id: string, report: StyleUpdateReport): string {
+    if (report.failed.length > 0) {
+        return `"${id}": update incomplete — failed: ${report.failed
+            .map((f) => f.id)
+            .join(", ")}`;
+    }
+    if (report.updated.length === 0) {
+        return `"${id}" is already up to date`;
+    }
+    return `Updated ${report.updated.join(", ")}`;
+}
+
 /** CSL tab: manage citation styles and locales for the CSL renderer. */
 export const CslStylesView: React.FC = () => {
     const [styles, setStyles] = useState<StyleInfo[]>([]);
     const [locales, setLocales] = useState<LocaleInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
-
-    // "Add style" panel state
-    const [showAddStyle, setShowAddStyle] = useState(false);
-    const [query, setQuery] = useState("");
-    const [results, setResults] = useState<StyleIndexEntry[]>([]);
-    const [searching, setSearching] = useState(false);
-    const [pasteKey, setPasteKey] = useState("");
-    const [pasteXml, setPasteXml] = useState("");
-
-    // "Add locale" panel state
-    const [showAddLocale, setShowAddLocale] = useState(false);
-    const [localeTag, setLocaleTag] = useState("");
 
     const refresh = useCallback(async () => {
         try {
@@ -87,68 +92,13 @@ export const CslStylesView: React.FC = () => {
         void refresh();
     }, [refresh]);
 
-    // Debounced directory search
-    useEffect(() => {
-        if (!showAddStyle || query.trim().length < 2) {
-            setResults([]);
-            return;
-        }
-        let cancelled = false;
-        setSearching(true);
-        const timer = window.setTimeout(() => {
-            void (async () => {
-                try {
-                    const hits = await workerBridge.cslRender.searchStyleIndex(
-                        query.trim(),
-                        20,
-                    );
-                    if (!cancelled) setResults(hits);
-                } catch {
-                    if (!cancelled) setResults([]);
-                } finally {
-                    if (!cancelled) setSearching(false);
-                }
-            })();
-        }, 300);
-        return () => {
-            cancelled = true;
-            window.clearTimeout(timer);
-        };
-    }, [query, showAddStyle]);
+    const openAddStyle = useCallback(() => {
+        new AddCslStyleModal(services.app, () => void refresh()).open();
+    }, [refresh]);
 
-    const handleDownloadStyle = useCallback(
-        async (id: string) => {
-            setBusy(true);
-            try {
-                const avail = await workerBridge.cslRender.ensureStyle(id);
-                if (avail.status === "ready") {
-                    services.notificationService.notify(
-                        "success",
-                        `Style "${id}" downloaded`,
-                    );
-                } else {
-                    services.notificationService.notify(
-                        "warning",
-                        `Style "${id}" added, but not ready yet`,
-                    );
-                }
-                await refresh();
-            } catch (e) {
-                services.logService.error(
-                    `Failed to download style ${id}`,
-                    "CslStylesView",
-                    e,
-                );
-                services.notificationService.notify(
-                    "error",
-                    `Failed to download style "${id}".`,
-                );
-            } finally {
-                setBusy(false);
-            }
-        },
-        [refresh],
-    );
+    const openAddLocale = useCallback(() => {
+        new AddCslLocaleModal(services.app, () => void refresh()).open();
+    }, [refresh]);
 
     const handleResolveDeps = useCallback(
         async (id: string) => {
@@ -162,6 +112,33 @@ export const CslStylesView: React.FC = () => {
                         : `"${id}" still has unresolved dependencies`,
                 );
                 await refresh();
+            } finally {
+                setBusy(false);
+            }
+        },
+        [refresh],
+    );
+
+    const handleUpdateStyle = useCallback(
+        async (id: string) => {
+            setBusy(true);
+            try {
+                const report = await workerBridge.cslRender.updateStyle(id);
+                services.notificationService.notify(
+                    report.failed.length > 0 ? "warning" : "success",
+                    updateSummary(id, report),
+                );
+                await refresh();
+            } catch (e) {
+                services.logService.error(
+                    `Failed to update style ${id}`,
+                    "CslStylesView",
+                    e,
+                );
+                services.notificationService.notify(
+                    "error",
+                    `Failed to update "${id}".`,
+                );
             } finally {
                 setBusy(false);
             }
@@ -196,58 +173,35 @@ export const CslStylesView: React.FC = () => {
         [refresh],
     );
 
-    const handleAddPasted = useCallback(async () => {
-        if (!pasteKey.trim() || !pasteXml.trim()) {
-            services.notificationService.notify(
-                "warning",
-                "Provide both a style key and the style XML.",
-            );
-            return;
-        }
-        setBusy(true);
-        try {
-            const avail = await workerBridge.cslRender.registerCustomStyle(
-                pasteKey.trim(),
-                pasteXml,
-                "paste",
-            );
-            services.notificationService.notify(
-                avail.status === "ready" ? "success" : "warning",
-                avail.status === "ready"
-                    ? `Style "${pasteKey.trim()}" added`
-                    : `Style "${pasteKey.trim()}" added, but not ready`,
-            );
-            setPasteKey("");
-            setPasteXml("");
-            await refresh();
-        } finally {
-            setBusy(false);
-        }
-    }, [pasteKey, pasteXml, refresh]);
-
-    const handleAddLocale = useCallback(async () => {
-        const tag = localeTag.trim();
-        if (!tag) return;
-        setBusy(true);
-        try {
-            const ok = await workerBridge.cslRender.ensureLocale(tag);
-            if (ok) {
+    const handleUpdateLocale = useCallback(
+        async (tag: string) => {
+            setBusy(true);
+            try {
+                const { updated } =
+                    await workerBridge.cslRender.updateLocale(tag);
                 services.notificationService.notify(
                     "success",
-                    `Locale "${tag}" downloaded`,
+                    updated
+                        ? `Locale "${tag}" updated`
+                        : `Locale "${tag}" is already up to date`,
                 );
-                setLocaleTag("");
-            } else {
+                await refresh();
+            } catch (e) {
+                services.logService.error(
+                    `Failed to update locale ${tag}`,
+                    "CslStylesView",
+                    e,
+                );
                 services.notificationService.notify(
                     "error",
-                    `Locale "${tag}" could not be downloaded.`,
+                    `Failed to update locale "${tag}".`,
                 );
+            } finally {
+                setBusy(false);
             }
-            await refresh();
-        } finally {
-            setBusy(false);
-        }
-    }, [localeTag, refresh]);
+        },
+        [refresh],
+    );
 
     const handleRemoveLocale = useCallback(
         async (tag: string) => {
@@ -262,100 +216,58 @@ export const CslStylesView: React.FC = () => {
         [refresh],
     );
 
-    const localIds = new Set(styles.map((s) => s.id));
-    const freshResults = results.filter((r) => !localIds.has(r.name));
-
     return (
         <div className="zotflow-csl-view">
             {/* ── Styles ── */}
-            <div className="zotflow-csl-section-header">
-                <span>Styles</span>
-                <button
-                    className="clickable-icon"
-                    aria-label="Add style"
-                    onClick={() => setShowAddStyle((v) => !v)}
-                >
-                    <ObsidianIcon icon={showAddStyle ? "x" : "plus"} />
-                </button>
-            </div>
+            <div className="zotflow-csl-section zotflow-csl-section--styles">
+                <div className="zotflow-csl-section-header">
+                    <span>Styles</span>
+                    <button
+                        className="clickable-icon"
+                        aria-label="Add style"
+                        onClick={openAddStyle}
+                    >
+                        <ObsidianIcon icon="plus" />
+                    </button>
+                </div>
 
-            {showAddStyle && (
-                <div className="zotflow-csl-add-panel">
-                    <input
-                        type="text"
-                        placeholder="Search the style directory (e.g. nature, ieee)…"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                    />
-                    {searching && (
-                        <div className="zotflow-csl-muted">Searching…</div>
-                    )}
-                    {freshResults.length > 0 && (
-                        <div className="zotflow-csl-list zotflow-csl-search-results">
-                            {freshResults.map((r) => (
-                                <div className="zotflow-csl-row" key={r.name}>
-                                    <div className="zotflow-csl-row-info">
-                                        <div className="zotflow-csl-row-title">
-                                            {r.title}
-                                        </div>
-                                        <div className="zotflow-csl-row-meta">
-                                            {r.name}
-                                            {r.dependent ? " · dependent" : ""}
-                                        </div>
-                                    </div>
-                                    <button
-                                        className="mod-cta"
-                                        disabled={busy}
-                                        onClick={() =>
-                                            void handleDownloadStyle(r.name)
-                                        }
-                                    >
-                                        Download
-                                    </button>
-                                </div>
-                            ))}
+                <div className="zotflow-csl-list">
+                    {loading && (
+                        <div className="zotflow-csl-empty">
+                            <ObsidianIcon
+                                icon="loader"
+                                className="zotflow-spin"
+                            />
+                            <span>Loading…</span>
                         </div>
                     )}
-                    <details className="zotflow-csl-paste">
-                        <summary>Or paste style XML</summary>
-                        <input
-                            type="text"
-                            placeholder="Style key (e.g. my-style)"
-                            value={pasteKey}
-                            onChange={(e) => setPasteKey(e.target.value)}
-                        />
-                        <textarea
-                            rows={5}
-                            placeholder="<style …>"
-                            value={pasteXml}
-                            onChange={(e) => setPasteXml(e.target.value)}
-                        />
-                        <button disabled={busy} onClick={() => void handleAddPasted()}>
-                            Add pasted style
-                        </button>
-                    </details>
-                </div>
-            )}
-
-            <div className="zotflow-csl-list">
-                {loading && <div className="zotflow-csl-muted">Loading…</div>}
-                {!loading && styles.length === 0 && (
-                    <div className="zotflow-csl-muted">
-                        No styles yet — click + to search and download one.
-                    </div>
-                )}
-                {styles.map((style) => (
+                    {!loading && styles.length === 0 && (
+                        <div className="zotflow-csl-empty">
+                            <ObsidianIcon icon="info" />
+                            <span>
+                                No styles yet — click + and enter a style id
+                                from zotero.org/styles.
+                            </span>
+                        </div>
+                    )}
+                    {styles.map((style) => (
                     <div className="zotflow-csl-row" key={style.id}>
                         <div className="zotflow-csl-row-info">
                             <div className="zotflow-csl-row-title">
                                 {style.title ?? style.id}
                             </div>
-                            <div className="zotflow-csl-row-meta">
+                            <div
+                                className="zotflow-csl-row-meta"
+                                title={style.remote?.sourceUrl}
+                            >
                                 {[
                                     style.id,
                                     style.source,
                                     style.dependent && style.parent
                                         ? `parent: ${style.parent}`
+                                        : null,
+                                    style.remote
+                                        ? `fetched ${fmtDate(style.remote.fetchedAt)}`
                                         : null,
                                 ]
                                     .filter(Boolean)
@@ -369,6 +281,16 @@ export const CslStylesView: React.FC = () => {
                                 onClick={() => void handleResolveDeps(style.id)}
                             >
                                 Download dependencies
+                            </button>
+                        )}
+                        {style.source === "remote-cache" && (
+                            <button
+                                className="clickable-icon"
+                                aria-label={`Update ${style.id} and its dependencies`}
+                                disabled={busy}
+                                onClick={() => void handleUpdateStyle(style.id)}
+                            >
+                                <ObsidianIcon icon="refresh-cw" />
                             </button>
                         )}
                         {style.source === "folder" ? (
@@ -389,68 +311,71 @@ export const CslStylesView: React.FC = () => {
                             </button>
                         )}
                     </div>
-                ))}
+                    ))}
+                </div>
             </div>
 
             {/* ── Locales ── */}
-            <div className="zotflow-csl-section-header">
-                <span>Locales</span>
-                <button
-                    className="clickable-icon"
-                    aria-label="Add locale"
-                    onClick={() => setShowAddLocale((v) => !v)}
-                >
-                    <ObsidianIcon icon={showAddLocale ? "x" : "plus"} />
-                </button>
-            </div>
-
-            {showAddLocale && (
-                <div className="zotflow-csl-add-panel zotflow-csl-add-locale">
-                    <input
-                        type="text"
-                        placeholder="Locale tag (e.g. de-DE, zh-CN, fr-FR)"
-                        value={localeTag}
-                        onChange={(e) => setLocaleTag(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter") void handleAddLocale();
-                        }}
-                    />
+            <div className="zotflow-csl-section zotflow-csl-section--locales">
+                <div className="zotflow-csl-section-header">
+                    <span>Locales</span>
                     <button
-                        className="mod-cta"
-                        disabled={busy || !localeTag.trim()}
-                        onClick={() => void handleAddLocale()}
+                        className="clickable-icon"
+                        aria-label="Add locale"
+                        onClick={openAddLocale}
                     >
-                        Download
+                        <ObsidianIcon icon="plus" />
                     </button>
                 </div>
-            )}
 
-            <div className="zotflow-csl-list">
-                {locales.map((locale) => (
+                <div className="zotflow-csl-list">
+                    {locales.map((locale) => (
                     <div className="zotflow-csl-row" key={locale.tag}>
                         <div className="zotflow-csl-row-info">
                             <div className="zotflow-csl-row-title">
                                 {locale.tag}
                             </div>
-                            <div className="zotflow-csl-row-meta">
+                            <div
+                                className="zotflow-csl-row-meta"
+                                title={locale.sourceUrl}
+                            >
                                 {locale.source === "builtin"
                                     ? "bundled"
                                     : locale.source === "folder"
                                       ? "from styles folder"
-                                      : "downloaded"}
+                                      : [
+                                            "downloaded",
+                                            locale.fetchedAt
+                                                ? `fetched ${fmtDate(locale.fetchedAt)}`
+                                                : null,
+                                        ]
+                                            .filter(Boolean)
+                                            .join(" · ")}
                             </div>
                         </div>
                         {locale.source === "remote-cache" ? (
-                            <button
-                                className="clickable-icon"
-                                aria-label={`Remove ${locale.tag}`}
-                                disabled={busy}
-                                onClick={() =>
-                                    void handleRemoveLocale(locale.tag)
-                                }
-                            >
-                                <ObsidianIcon icon="trash-2" />
-                            </button>
+                            <>
+                                <button
+                                    className="clickable-icon"
+                                    aria-label={`Update ${locale.tag}`}
+                                    disabled={busy}
+                                    onClick={() =>
+                                        void handleUpdateLocale(locale.tag)
+                                    }
+                                >
+                                    <ObsidianIcon icon="refresh-cw" />
+                                </button>
+                                <button
+                                    className="clickable-icon"
+                                    aria-label={`Remove ${locale.tag}`}
+                                    disabled={busy}
+                                    onClick={() =>
+                                        void handleRemoveLocale(locale.tag)
+                                    }
+                                >
+                                    <ObsidianIcon icon="trash-2" />
+                                </button>
+                            </>
                         ) : (
                             <span className="zotflow-csl-muted">
                                 {locale.source === "builtin"
@@ -459,7 +384,8 @@ export const CslStylesView: React.FC = () => {
                             </span>
                         )}
                     </div>
-                ))}
+                    ))}
+                </div>
             </div>
         </div>
     );

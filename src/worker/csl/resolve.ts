@@ -17,11 +17,12 @@ function djb2(s: string): string {
  * here, BEFORE any CSL.Engine is constructed, because the engine's sys
  * callbacks must return synchronously.
  */
+const FALLBACK_LOCALE = "en-US";
+
 export class StyleResolver {
 	constructor(
 		private styles: StyleRepository,
-		private locales: LocaleStore,
-		private getDefaultLocale: () => string
+		private locales: LocaleStore
 	) {}
 
 	/**
@@ -40,7 +41,7 @@ export class StyleResolver {
 		if (!chain.ok) return chain.failure;
 
 		const lang = normalizeLocale(
-			opts.locale ?? chain.defaultLocale ?? this.getDefaultLocale()
+			opts.locale ?? chain.defaultLocale ?? FALLBACK_LOCALE
 		);
 		if (await this.locales.hasOffline(lang)) return { status: "ready" };
 		if (!opts.allowNetwork) return { status: "resolvable" };
@@ -75,7 +76,7 @@ export class StyleResolver {
 		}
 
 		const lang = normalizeLocale(
-			opts.locale ?? chain.defaultLocale ?? this.getDefaultLocale()
+			opts.locale ?? chain.defaultLocale ?? FALLBACK_LOCALE
 		);
 		if (!(await this.locales.ensure(lang))) {
 			throw new UnavailableStyleError(requestedId, {
