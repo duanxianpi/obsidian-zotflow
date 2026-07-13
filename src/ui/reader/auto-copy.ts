@@ -11,6 +11,8 @@ export interface AutoCopyContext {
     parentItemKey?: string;
     /** Library ID (for cloud attachments). Undefined for local files. */
     libraryID?: number;
+    /** Key of the attachment the annotation was created on. Undefined for local files. */
+    attachmentKey?: string;
 }
 
 /**
@@ -70,6 +72,7 @@ export async function copyAnnotationOnCreate(
                         {
                             ...stripAnnotationForPayload(annotation),
                             libraryID: ctx.libraryID,
+                            parentItem: ctx.attachmentKey,
                         },
                     ],
                 },

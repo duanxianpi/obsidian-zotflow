@@ -898,7 +898,9 @@ export class LibraryTemplateService {
         return {
             key: annotation.id!,
             libraryID: annotation.libraryID!,
-            parentItem,
+            // Citation-template inputs carry the attachment key on the
+            // AnnotationJSON itself (restored by the payload builders).
+            parentItem: parentItem ?? annotation.parentItem,
             type: annotation.type,
             authorName: annotation.authorName,
             text: this.sanitizeQuotesString(annotation.text || ""),

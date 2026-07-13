@@ -225,12 +225,14 @@ export class IframeReaderBridge {
                         type: "zotflow-citation",
                         libraryID,
                         key: parentKey,
-                        // The reader strips `libraryID` from annotations during
-                        // drag, so restore it from the attachment's library for
-                        // annotation-link generation.
+                        // The reader strips `libraryID`/`parentItem` from
+                        // annotations during drag, so restore them from the
+                        // attachment for annotation-link generation and the
+                        // CSL citation filter (page locator resolution).
                         annotations: annotations.map((a) => ({
                             ...stripAnnotationForPayload(a),
                             libraryID,
+                            parentItem: this.attachmentItem!.key,
                         })),
                     };
                     dataTransfer.setData(
@@ -288,9 +290,11 @@ export class IframeReaderBridge {
                             {
                                 libraryID: this.attachmentItem.libraryID,
                                 key: parentKey,
-                                annotations: annotations.map((a) =>
-                                    stripAnnotationForPayload(a),
-                                ),
+                                annotations: annotations.map((a) => ({
+                                    ...stripAnnotationForPayload(a),
+                                    libraryID: this.attachmentItem!.libraryID,
+                                    parentItem: this.attachmentItem!.key,
+                                })),
                             },
                             citationFormat,
                         );

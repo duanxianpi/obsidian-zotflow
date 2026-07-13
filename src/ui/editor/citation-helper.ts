@@ -52,6 +52,7 @@ export function stripAnnotationForPayload(
     return {
         id: annotation.id,
         libraryID: annotation.libraryID,
+        parentItem: annotation.parentItem,
         type: annotation.type,
         text: annotation.text,
         comment: annotation.comment,

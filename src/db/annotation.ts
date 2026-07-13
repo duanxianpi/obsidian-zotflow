@@ -94,6 +94,7 @@ export async function getAnnotationJson(
     for (const annotation of annotations) {
         const o: any = {};
         o.libraryID = annotation.libraryID;
+        o.parentItem = item.key;
         o.id = annotation.key;
         o.type = annotation.raw.data.annotationType;
         o.isExternal = annotation.raw.data.annotationIsExternal || false; // Default to false

@@ -704,6 +704,7 @@ export class ZoteroReaderView extends ItemView {
                     sourceNotePath,
                     parentItemKey: parentKey,
                     libraryID: this.attachmentItem.libraryID,
+                    attachmentKey: this.attachmentItem.key,
                 });
             }
         }

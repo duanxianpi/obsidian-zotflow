@@ -130,6 +130,12 @@ export type AnnotationType =
 /** Serialized annotation object exchanged between the reader iframe and the plugin. */
 export interface AnnotationJSON {
     libraryID?: number;
+    /**
+     * Attachment item key this annotation belongs to (ZotFlow addition, like
+     * libraryID). The reader strips it in transit, so payload builders restore
+     * it from the attachment they were opened on.
+     */
+    parentItem?: string;
     id: string;
     type: AnnotationType;
     image?: Uint8Array;
