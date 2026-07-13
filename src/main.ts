@@ -278,6 +278,18 @@ export default class ZotFlow extends Plugin {
         });
 
         this.addCommand({
+            id: "update-all-csl-data",
+            name: "Update CSL citation data for all items",
+            callback: async () => {
+                await this.runTaskCommand(
+                    () => workerBridge.createBackfillCslJsonTask(),
+                    "CSL citation data update started",
+                    "Failed to start CSL citation data update",
+                );
+            },
+        });
+
+        this.addCommand({
             id: "extract-all-annotation-images",
             name: "Extract all annotation images from attachments",
             callback: async () => {

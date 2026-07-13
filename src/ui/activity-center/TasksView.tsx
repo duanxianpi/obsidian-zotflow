@@ -12,6 +12,7 @@ const TASK_TYPE_ICONS: Record<TaskType, string> = {
     "batch-extract-images": "image",
     "batch-extract-external-annotations": "scan-search",
     "download-attachment": "download",
+    "backfill-csljson": "book-marked",
     "test-task": "flask-conical",
 };
 

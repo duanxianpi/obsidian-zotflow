@@ -256,6 +256,11 @@ export class WorkerBridge {
         return this._api.createBatchExtractImagesTask(input);
     }
 
+    async createBackfillCslJsonTask(): Promise<string> {
+        this.assertInitialized();
+        return this._api.createBackfillCslJsonTask();
+    }
+
     async downloadAttachment(
         attachmentItem: IDBZoteroItem<AttachmentData>,
     ): Promise<Blob> {

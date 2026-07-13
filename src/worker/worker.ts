@@ -82,6 +82,7 @@ export interface WorkerAPI {
     createBatchExtractImagesTask(
         input: BatchExtractImagesInput,
     ): Promise<string>;
+    createBackfillCslJsonTask(): Promise<string>;
     downloadAttachment(
         attachmentItem: IDBZoteroItem<AttachmentData>,
     ): Promise<Blob>;
@@ -531,6 +532,11 @@ const exposedApi: WorkerAPI = {
             _currentSettings!,
             input,
         );
+    },
+
+    createBackfillCslJsonTask: async () => {
+        assertInitialized();
+        return _taskManager!.createBackfillCslJsonTask(_zotero!);
     },
 
     downloadAttachment: async (

@@ -7,6 +7,7 @@ import type {
     UpdateOptions,
 } from "worker/services/library-note";
 import type { AttachmentService } from "worker/services/attachment";
+import type { ZoteroAPIService } from "worker/services/zotero";
 import type { PDFProcessWorker } from "worker/services/pdf-processor";
 import type { ZotFlowSettings } from "settings/types";
 import type { BatchNoteInput } from "./impl/batch-note-task";
@@ -29,6 +30,8 @@ export class TaskManager {
      * Key: `libraryId` (number) for per-library syncs, `"all"` for full syncs.
      */
     private activeSyncs = new Map<number | "all", string>();
+    /** In-flight csljson backfill task id — always all-libraries, so at most one. */
+    private activeCslBackfill?: string;
 
     constructor(private parentHost: IParentProxy) {}
 
@@ -117,6 +120,35 @@ export class TaskManager {
         task.execute(controller.signal).finally(() => {
             this.activeControllers.delete(task.id);
             this.activeSyncs.delete(scope);
+        });
+
+        return task.id;
+    }
+
+    /** Refetch and store the CSL-JSON payload for every citable item. */
+    public async createBackfillCslJsonTask(zotero: ZoteroAPIService) {
+        if (this.activeCslBackfill) {
+            this.parentHost.log(
+                "info",
+                `CSL data update already in progress; reusing task ${this.activeCslBackfill}.`,
+                "TaskManager",
+            );
+            return this.activeCslBackfill;
+        }
+
+        const { BackfillCslJsonTask } =
+            await import("./impl/backfill-csljson-task");
+        const task = new BackfillCslJsonTask(this.parentHost, zotero);
+        this.activeCslBackfill = task.id;
+
+        this.registerTask(task);
+
+        const controller = new AbortController();
+        this.activeControllers.set(task.id, controller);
+
+        void task.execute(controller.signal).finally(() => {
+            this.activeControllers.delete(task.id);
+            this.activeCslBackfill = undefined;
         });
 
         return task.id;
