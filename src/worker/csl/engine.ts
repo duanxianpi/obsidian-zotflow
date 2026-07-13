@@ -133,24 +133,26 @@ export function renderBibliographyEntries(
 
 /**
  * One-shot citation cluster for ad-hoc rendering. Optional CiteProps
- * (locator, label, ...) apply to every cite in the cluster — locators are
- * per-cite data, so they belong here rather than on the CSL-JSON item.
+ * (locator, label, ...) are per-cite data, so they belong here rather than
+ * on the CSL-JSON item: a single object applies to every cite, an array is
+ * matched to the ids by position (sparse entries allowed).
  */
 export function renderCitationCluster(
 	host: EngineHost,
 	itemIds: string[],
 	format: OutputFormat,
-	props?: CiteProps
+	props?: CiteProps | (CiteProps | undefined)[]
 ): string {
 	host.setFormat(format);
 	const cluster = host.engine.makeCitationCluster(
-		itemIds.map((id) => {
+		itemIds.map((id, i) => {
+			const p = Array.isArray(props) ? props[i] : props;
 			const ci: CitationItem = { id };
-			if (props?.locator !== undefined) ci.locator = props.locator;
-			if (props?.label !== undefined) ci.label = props.label;
-			if (props?.prefix !== undefined) ci.prefix = props.prefix;
-			if (props?.suffix !== undefined) ci.suffix = props.suffix;
-			if (props?.suppressAuthor) ci["suppress-author"] = true;
+			if (p?.locator !== undefined) ci.locator = p.locator;
+			if (p?.label !== undefined) ci.label = p.label;
+			if (p?.prefix !== undefined) ci.prefix = p.prefix;
+			if (p?.suffix !== undefined) ci.suffix = p.suffix;
+			if (p?.suppressAuthor) ci["suppress-author"] = true;
 			return ci;
 		})
 	);

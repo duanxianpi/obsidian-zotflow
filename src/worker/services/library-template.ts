@@ -251,15 +251,16 @@ export class LibraryTemplateService {
             };
             return await this.convertService.html2md(input, opts);
         });
-        // CSL rendering filters. Args are an optional positional style
-        // shorthand plus kwargs:
+        // CSL rendering filters. Both take one input or a list; args are an
+        // optional positional style shorthand plus kwargs:
         //   {{ item | citation: "ieee" }}
         //   {{ annotation | citation }}   -> cites the annotated item with
         //                                    the page as locator, e.g. (Doe, 2020, p. 5)
+        //   {{ items | citation }}        -> ONE cluster: (Doe, 2020; Roe, 2021)
         //   {{ items | bibliography: style: "apa", locale: "de-DE", format: "text" }}
-        // citation takes ONE item (loop over lists); bibliography takes a
-        // list (or one item) — sorting and numbering are computed over the
-        // whole batch, so rendering entries one by one would break them.
+        // A citation list renders as a single cluster and a bibliography list
+        // as one batch — sorting/numbering/merging are computed by citeproc
+        // over the whole input, so looping in the template would break them.
         // Defaults: style -> settings.cslDefaultStyleId, locale -> style's
         // default-locale -> en-US, format -> settings.cslDefaultFormat.
         // Note: each call is a standalone render, so author disambiguation
@@ -268,20 +269,32 @@ export class LibraryTemplateService {
             "citation",
             async (input: unknown, ...args: unknown[]) => {
                 const { opts } = this.parseCslRenderArgs(args);
-                if (Array.isArray(input)) {
+                const refs = Array.isArray(input) ? input : [input];
+                if (refs.length === 0) {
                     throw new Error(
-                        "The citation filter renders one item — use a for loop for lists",
+                        "The citation filter received an empty item list",
                     );
                 }
-                let ref = input;
-                let props: CiteProps | undefined;
-                if (this.isAnnotationContext(input)) {
-                    const resolved = await this.resolveAnnotationCite(input);
-                    ref = resolved.ref;
-                    props = resolved.props;
+                const items: CSLItem[] = [];
+                const props: (CiteProps | undefined)[] = [];
+                let hasProps = false;
+                for (let ref of refs) {
+                    let p: CiteProps | undefined;
+                    if (this.isAnnotationContext(ref)) {
+                        const resolved =
+                            await this.resolveAnnotationCite(ref);
+                        ref = resolved.ref;
+                        p = resolved.props;
+                    }
+                    items.push(await this.getCslJson(ref, "citation"));
+                    props.push(p);
+                    if (p) hasProps = true;
                 }
-                const item = await this.getCslJson(ref, "citation");
-                return this.cslRender.renderCitation([item], opts, props);
+                return this.cslRender.renderCitation(
+                    items,
+                    opts,
+                    hasProps ? props : undefined,
+                );
             },
         );
         this.engine.registerFilter(

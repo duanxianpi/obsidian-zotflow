@@ -142,7 +142,7 @@ export class CslRenderService {
 	async renderCitation(
 		items: CSLItem[],
 		opts: RenderOptions,
-		props?: CiteProps
+		props?: CiteProps | (CiteProps | undefined)[]
 	): Promise<string> {
 		const { host } = await this.acquireHost(opts);
 		try {

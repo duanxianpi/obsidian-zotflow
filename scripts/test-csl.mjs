@@ -319,6 +319,17 @@ await test("citation clusters", async () => {
         { styleXml: apa, format: "text" },
     );
     check(plain === "(Doe, 2020)", `no props -> unchanged (got "${plain}")`);
+
+    // Per-cite props: an array is matched by position (sparse allowed).
+    const mixed = await service.renderCitation(
+        [ITEMS.doe2020, ITEMS.roe2021],
+        { styleXml: apa, format: "text" },
+        [{ locator: "5", label: "page" }, undefined],
+    );
+    check(
+        mixed === "(Doe, 2020, p. 5; Roe, 2021)",
+        `per-cite locator array (got "${mixed}")`,
+    );
 });
 
 await test("remote style fetched once, then served from cache", async () => {

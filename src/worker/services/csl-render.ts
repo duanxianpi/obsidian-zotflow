@@ -101,7 +101,7 @@ export class CslRenderWorkerService {
     renderCitation(
         items: CSLItem[],
         opts: RenderOptions,
-        props?: CiteProps,
+        props?: CiteProps | (CiteProps | undefined)[],
     ): Promise<string> {
         return this.core.renderCitation(items, opts, props);
     }
