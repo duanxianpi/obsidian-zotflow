@@ -1,6 +1,6 @@
 import CSL from "citeproc";
-import type { CiteprocSys, Engine } from "citeproc";
-import type { CSLItem, OutputFormat } from "./types";
+import type { CiteprocSys, CitationItem, Engine } from "citeproc";
+import type { CiteProps, CSLItem, OutputFormat } from "./types";
 import { registerMarkdownFormats } from "./formats/markdown";
 
 /** Everything an engine needs, fully prefetched (sys callbacks are sync). */
@@ -131,15 +131,28 @@ export function renderBibliographyEntries(
 	}
 }
 
-/** One-shot citation cluster for ad-hoc rendering. */
+/**
+ * One-shot citation cluster for ad-hoc rendering. Optional CiteProps
+ * (locator, label, ...) apply to every cite in the cluster — locators are
+ * per-cite data, so they belong here rather than on the CSL-JSON item.
+ */
 export function renderCitationCluster(
 	host: EngineHost,
 	itemIds: string[],
-	format: OutputFormat
+	format: OutputFormat,
+	props?: CiteProps
 ): string {
 	host.setFormat(format);
 	const cluster = host.engine.makeCitationCluster(
-		itemIds.map((id) => ({ id }))
+		itemIds.map((id) => {
+			const ci: CitationItem = { id };
+			if (props?.locator !== undefined) ci.locator = props.locator;
+			if (props?.label !== undefined) ci.label = props.label;
+			if (props?.prefix !== undefined) ci.prefix = props.prefix;
+			if (props?.suffix !== undefined) ci.suffix = props.suffix;
+			if (props?.suppressAuthor) ci["suppress-author"] = true;
+			return ci;
+		})
 	);
 	return cluster.trim();
 }

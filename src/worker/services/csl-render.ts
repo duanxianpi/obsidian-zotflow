@@ -98,8 +98,12 @@ export class CslRenderWorkerService {
         return this.core.renderBibliography(items, opts);
     }
 
-    renderCitation(items: CSLItem[], opts: RenderOptions): Promise<string> {
-        return this.core.renderCitation(items, opts);
+    renderCitation(
+        items: CSLItem[],
+        opts: RenderOptions,
+        props?: CiteProps,
+    ): Promise<string> {
+        return this.core.renderCitation(items, opts, props);
     }
 
     /* --------------------- id-keyed context API ------------------------ */

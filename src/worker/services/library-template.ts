@@ -30,7 +30,12 @@ import type { NotePathService } from "./note-path";
 import type { CitationTemplateInput } from "services/citation-service";
 import type { CslRenderWorkerService } from "./csl-render";
 import type { ZoteroAPIService } from "./zotero";
-import type { CSLItem, OutputFormat, RenderOptions } from "worker/csl";
+import type {
+    CiteProps,
+    CSLItem,
+    OutputFormat,
+    RenderOptions,
+} from "worker/csl";
 import { extractYear } from "utils/date";
 
 const DEFAULT_ITEM_TEMPLATE = `---
@@ -246,10 +251,15 @@ export class LibraryTemplateService {
             };
             return await this.convertService.html2md(input, opts);
         });
-        // CSL rendering filters. Input is a context item (or array of them);
-        // args are an optional positional style shorthand plus kwargs:
+        // CSL rendering filters. Args are an optional positional style
+        // shorthand plus kwargs:
         //   {{ item | citation: "ieee" }}
+        //   {{ annotation | citation }}   -> cites the annotated item with
+        //                                    the page as locator, e.g. (Doe, 2020, p. 5)
         //   {{ items | bibliography: style: "apa", locale: "de-DE", format: "text" }}
+        // citation takes ONE item (loop over lists); bibliography takes a
+        // list (or one item) — sorting and numbering are computed over the
+        // whole batch, so rendering entries one by one would break them.
         // Defaults: style -> settings.cslDefaultStyleId, locale -> style's
         // default-locale -> en-US, format -> settings.cslDefaultFormat.
         // Note: each call is a standalone render, so author disambiguation
@@ -258,8 +268,20 @@ export class LibraryTemplateService {
             "citation",
             async (input: unknown, ...args: unknown[]) => {
                 const { opts } = this.parseCslRenderArgs(args);
-                const items = await this.collectCslItems(input, "citation");
-                return this.cslRender.renderCitation(items, opts);
+                if (Array.isArray(input)) {
+                    throw new Error(
+                        "The citation filter renders one item — use a for loop for lists",
+                    );
+                }
+                let ref = input;
+                let props: CiteProps | undefined;
+                if (this.isAnnotationContext(input)) {
+                    const resolved = await this.resolveAnnotationCite(input);
+                    ref = resolved.ref;
+                    props = resolved.props;
+                }
+                const item = await this.getCslJson(ref, "citation");
+                return this.cslRender.renderCitation([item], opts, props);
             },
         );
         this.engine.registerFilter(
@@ -274,6 +296,55 @@ export class LibraryTemplateService {
                 return entries.join(join);
             },
         );
+    }
+
+    /** Annotation contexts carry `type` (highlight/ink/...) but no itemType. */
+    private isAnnotationContext(
+        ref: unknown,
+    ): ref is AnnotationTemplateContext {
+        return (
+            typeof ref === "object" &&
+            ref !== null &&
+            !("itemType" in ref) &&
+            typeof (ref as { type?: unknown }).type === "string" &&
+            "pageLabel" in ref
+        );
+    }
+
+    /**
+     * An annotation cites the item it annotates: annotation -> attachment
+     * (parentItem) -> top-level item, with the page label as the locator.
+     */
+    private async resolveAnnotationCite(
+        anno: AnnotationTemplateContext,
+    ): Promise<{
+        ref: { key: string; libraryID: number };
+        props?: CiteProps;
+    }> {
+        if (!anno.parentItem) {
+            throw new Error(
+                "This annotation has no parent attachment — nothing to cite",
+            );
+        }
+        const attachment = await db.items.get([anno.libraryID, anno.parentItem]);
+        if (!attachment) {
+            throw new ZotFlowError(
+                ZotFlowErrorCode.RESOURCE_MISSING,
+                "LibraryTemplateService",
+                `Attachment not found: ${anno.libraryID}/${anno.parentItem}`,
+            );
+        }
+        if (!attachment.parentItem) {
+            throw new Error(
+                "This annotation belongs to a standalone attachment — there is no citable item",
+            );
+        }
+        return {
+            ref: { key: attachment.parentItem, libraryID: anno.libraryID },
+            props: anno.pageLabel
+                ? { locator: anno.pageLabel, label: "page" }
+                : undefined,
+        };
     }
 
     /**

@@ -16,6 +16,7 @@ import { StyleResolver } from "./resolve";
 import { bustCache, StyleRepository } from "./styles";
 import type {
 	Availability,
+	CiteProps,
 	CSLItem,
 	LocalePreview,
 	OutputFormat,
@@ -138,14 +139,19 @@ export class CslRenderService {
 		}
 	}
 
-	async renderCitation(items: CSLItem[], opts: RenderOptions): Promise<string> {
+	async renderCitation(
+		items: CSLItem[],
+		opts: RenderOptions,
+		props?: CiteProps
+	): Promise<string> {
 		const { host } = await this.acquireHost(opts);
 		try {
 			host.setItems(items);
 			return renderCitationCluster(
 				host,
 				items.map((i) => String(i.id)),
-				opts.format ?? this.defaultFormat
+				opts.format ?? this.defaultFormat,
+				props
 			);
 		} finally {
 			this.pool.release(host);

@@ -295,6 +295,30 @@ await test("citation clusters", async () => {
         { styleXml: apa, format: "text" },
     );
     check(cite === "(Doe, 2020; Roe, 2021)", `multi-item cluster (got "${cite}")`);
+
+    // Locators are per-cite data (CiteProps), not CSL-JSON item fields.
+    const paged = await service.renderCitation(
+        [ITEMS.doe2020],
+        { styleXml: apa, format: "text" },
+        { locator: "23", label: "page" },
+    );
+    check(paged === "(Doe, 2020, p. 23)", `page locator (got "${paged}")`);
+
+    const ranged = await service.renderCitation(
+        [ITEMS.doe2020],
+        { styleXml: apa, format: "text" },
+        { locator: "23-25", label: "page" },
+    );
+    check(
+        ranged.includes("pp. 23"),
+        `page range pluralizes the label (got "${ranged}")`,
+    );
+
+    const plain = await service.renderCitation(
+        [ITEMS.doe2020],
+        { styleXml: apa, format: "text" },
+    );
+    check(plain === "(Doe, 2020)", `no props -> unchanged (got "${plain}")`);
 });
 
 await test("remote style fetched once, then served from cache", async () => {
