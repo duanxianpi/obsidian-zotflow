@@ -122,6 +122,16 @@ export function normalizeItem(
         raw: raw,
     } as AnyIDBZoteroItem;
 
+    // Only regular items are citable — child types carry no useful CSL data.
+    if (
+        raw.csljson &&
+        raw.data.itemType !== "attachment" &&
+        raw.data.itemType !== "note" &&
+        raw.data.itemType !== "annotation"
+    ) {
+        item.csljson = raw.csljson;
+    }
+
     return item;
 }
 

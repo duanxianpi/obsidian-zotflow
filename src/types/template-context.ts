@@ -50,6 +50,9 @@ export interface ItemTemplateContext {
 
     tags: Array<{ tag: string; type?: number }>;
 
+    /** CSL-JSON payload from the Zotero API (synced with include=csljson). */
+    csljson?: Record<string, unknown>;
+
     // Children
     attachments: AttachmentTemplateContext[];
     annotations: AnnotationTemplateContext[];

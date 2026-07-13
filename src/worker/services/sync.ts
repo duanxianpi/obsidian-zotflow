@@ -570,6 +570,9 @@ export class SyncService {
                     const batchRes = await libHandle.items().get({
                         itemKey: slice.join(","),
                         includeTrashed: true,
+                        // csljson: server-side canonical item -> CSL-JSON
+                        // conversion, stored for the citation template filters.
+                        include: "data,csljson",
                     });
 
                     const newItems = batchRes.raw;

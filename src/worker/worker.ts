@@ -226,12 +226,16 @@ const exposedApi: WorkerAPI = {
             _notePath = new NotePathService(settings, _dbHelper);
             _convert = new ConvertService();
 
+            _cslRender = new CslRenderWorkerService(settings);
+
             _template = new LibraryTemplateService(
                 settings,
                 parentHost,
                 _dbHelper,
                 _notePath,
                 _convert,
+                _cslRender,
+                _zotero,
             );
             _libraryNote = new LibraryNoteService(
                 settings,
@@ -264,8 +268,6 @@ const exposedApi: WorkerAPI = {
                 _convert,
             );
             _key = new KeyService(_zotero, parentHost);
-
-            _cslRender = new CslRenderWorkerService(settings);
 
             _taskManager = new TaskManager(parentHost);
 

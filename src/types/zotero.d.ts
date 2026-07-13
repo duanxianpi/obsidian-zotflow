@@ -99,6 +99,8 @@ export interface ZoteroItem<T extends ZoteroItemData> {
         creatorsSummary?: string;
     };
     data: T;
+    /** CSL-JSON payload, present when fetched with include=data,csljson. */
+    csljson?: Record<string, unknown>;
 }
 
 /** Union of all possible `ZoteroItem<T>` instantiations. */
