@@ -22,10 +22,23 @@ const convert = new ConvertService();
 const WRAPPER_OPEN = `<div data-citation-items="%5B%7B%22uris%22%3A%5B%22http%3A%2F%2Fzotero.org%2Fusers%2F4100175%2Fitems%2FU285LCSS%22%5D%2C%22itemData%22%3A%7B%22id%22%3A%22http%3A%2F%2Fzotero.org%2Fusers%2F4100175%2Fitems%2FU285LCSS%22%2C%22type%22%3A%22article-journal%22%2C%22title%22%3A%22Bitcoin%3A%20A%20Peer-to-Peer%20Electronic%20Cash%20System%22%2C%22author%22%3A%5B%7B%22family%22%3A%22Nakamoto%22%2C%22given%22%3A%22Satoshi%22%7D%5D%7D%7D%5D" data-schema-version="5">`;
 const WRAPPER_CLOSE = `</div>`;
 
-/** Shared options for html2md calls in tests. */
+/**
+ * Shared conversion options.
+ *
+ * `strictLineBreaks` mirrors ONE vault setting, so both directions must be
+ * given the same value — production sources both from
+ * `vaultConfig.strictLineBreaks` (see item-note.ts). A mismatched pair models
+ * a configuration that cannot occur and makes `<br>` round-tripping look
+ * broken when it is not.
+ */
+const STRICT_LINE_BREAKS = false;
+
 const HTML2MD_OPTS: Html2MdOptions = {
     annotationImageFolder: "ZotFlow/images",
+    strictLineBreaks: STRICT_LINE_BREAKS,
 };
+
+const MD2HTML_OPTS = { strictLineBreaks: STRICT_LINE_BREAKS };
 
 function wrap(body: string): string {
     return `${WRAPPER_OPEN}\n${body}\n${WRAPPER_CLOSE}`;
@@ -437,7 +450,7 @@ export async function run(filter?: string[]) {
         console.log(md);
 
         // ── md → html ──
-        const htmlOut = await convert.md2html(md, { strictLineBreaks: true });
+        const htmlOut = await convert.md2html(md, MD2HTML_OPTS);
         console.log("--- HTML (round-tripped) ---");
         console.log(htmlOut);
 

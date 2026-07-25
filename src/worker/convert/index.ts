@@ -7,7 +7,6 @@
 
 export { html2mdWithProcessors } from "./html-to-md";
 export type { Html2MdOptions } from "./html-to-md";
-export { NOTE_META_PREFIX } from "./html-to-md";
 export { md2htmlWithProcessors } from "./md-to-html";
 export type { ConvertOptions } from "./md-to-html";
 export { annoHtml2md, annoMd2html } from "./annotation-comment";

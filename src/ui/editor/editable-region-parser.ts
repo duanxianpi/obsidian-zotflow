@@ -1,3 +1,5 @@
+import { createNoteMetaScanner } from "utils/note-meta";
+
 import type { Text } from "@codemirror/state";
 
 /* ================================================================ */
@@ -206,10 +208,10 @@ export function parseEditableRegions(doc: Text): EditableRegion[] {
         }
     }
 
-    // Detect <!-- ZF_NOTE_META ... --> inside NOTE regions only.
+    // Detect the ZF_NOTE_META marker inside NOTE regions only.
     // Uses the global flag + lastIndex to scan within each region's bounds
     // on the already-allocated `text` string — avoids a .slice() per region.
-    const META_REGEX_G = /<!-- ZF_NOTE_META [\s\S]*?-->/g;
+    const META_REGEX_G = createNoteMetaScanner();
     for (const region of regions) {
         if (region.type !== "NOTE") continue;
 
