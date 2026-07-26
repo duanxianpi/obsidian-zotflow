@@ -3,6 +3,9 @@
 Zotero note HTML ↔ Obsidian Markdown. Runs entirely in the Web Worker, with no
 DOM dependency.
 
+> 中文版见 [README.zh.md](./README.zh.md)。The two are equivalent; keep them in
+> sync when changing either.
+
 Two formats, neither a superset of the other. Zotero's note schema is a fixed
 ProseMirror document model; Obsidian's markdown is CommonMark plus GFM plus a
 handful of Obsidian-only forms. Most of the work in this module is deciding, per
