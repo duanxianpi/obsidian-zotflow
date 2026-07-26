@@ -730,24 +730,25 @@ group("Tasks", [
 - [!] important
 - [-] cancelled
 - [>] deferred`,
-        expect: "canonical",
+        expect: "broken",
+        gap: "bug",
         mustKeep: ["[/] in progress", "[?] question", "[!] important", "[-] cancelled", "[>] deferred"],
-        note: "Community-plugin statuses in a tight list of their own. Not GFM task items, so they ride through as plain text. Contrast task-custom-status-loose.",
+        mustNotHave: ["\\[/]", "\\[?]", "\\[!]", "\\[-]", "\\[>]"],
+        note: "Community-plugin statuses. Escaped to `\\[/]`, which Obsidian's Tasks plugin no longer recognizes. This case passed until `mustNotHave` was added: `\\[/] in progress` still *contains* `[/] in progress`, so the mustKeep alone never noticed. Second time that substring trap has hidden a real failure — see the mixed-document callout case.",
     },
     {
-        id: "task-custom-status-loose",
+        id: "task-custom-status-mixed",
         name: "Custom status mixed with real tasks",
         syntax: "- [x] … - [/] …",
         md: `- [x] done
 - [ ] todo
-    - [ ] nested, which makes the list loose
 - [/] in progress
 - [?] question`,
         expect: "broken",
         gap: "bug",
         mustKeep: ["[/] in progress", "[?] question"],
         mustNotHave: ["\\[/]", "\\[?]"],
-        note: "The nested item makes the list loose, so each item's text becomes its own paragraph and starts at a line break — where `[` is escaped. Real GFM tasks are unaffected because task-list lifts their marker into `listItem.checked` and the serializer re-emits it. A list mixing both, which is what a real reading queue looks like, loses the custom ones.",
+        note: "Real GFM tasks are unaffected — task-list lifts their marker into `listItem.checked` and the serializer re-emits it — so a mixed list, which is what a reading queue looks like, keeps the standard ones and loses the plugin ones. Nothing to do with the list being loose or tight, or with GFM tasks being present: a bare `[` in text is escaped everywhere, mid-line included.",
     },
     {
         id: "task-with-wikilink",
