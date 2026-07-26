@@ -506,6 +506,18 @@ group("Footnotes", [
         note: "Used to come back as `^\\[…]`: the old pattern matched `[^id]` but not `^[text]`, leaving the `[` to the escape pass. The scanner now claims it, including a nested `[[…]]` in the footnote body.",
     },
     {
+        id: "footnote-inline-wrapped",
+        name: "Inline footnote across a line break",
+        syntax: "^[a\\nb]",
+        md: `The claim is never quite stated.^[They say it in §4, but
+framed as complexity rather than as an argument.] Worth checking.`,
+        expect: "broken",
+        gap: "bug",
+        mustKeep: ["^[They say it in §4, but"],
+        mustNotHave: ["^\\["],
+        note: "`scanInlineFootnote` stops at a newline, as the bracket forms all do, so a footnote wrapped across two source lines is not claimed and its `[` is escaped. Obsidian is happy with the wrapped form — it is ordinary inline content — so this is a real gap. Allowing newlines needs care: an unterminated `^[` would then run to the end of the paragraph. Found by a hand-written note, not by this file, which is the argument for keeping one of those around.",
+    },
+    {
         id: "footnote-multiblock",
         name: "Multi-paragraph footnote",
         syntax: "[^1]: multi-line",
@@ -688,7 +700,22 @@ group("Tasks", [
 - [>] deferred`,
         expect: "canonical",
         mustKeep: ["[/] in progress", "[?] question", "[!] important", "[-] cancelled", "[>] deferred"],
-        note: "Community-plugin statuses. Not GFM task items, so these ride through as plain text — the risk is `[` being escaped.",
+        note: "Community-plugin statuses in a tight list of their own. Not GFM task items, so they ride through as plain text. Contrast task-custom-status-loose.",
+    },
+    {
+        id: "task-custom-status-loose",
+        name: "Custom status mixed with real tasks",
+        syntax: "- [x] … - [/] …",
+        md: `- [x] done
+- [ ] todo
+    - [ ] nested, which makes the list loose
+- [/] in progress
+- [?] question`,
+        expect: "broken",
+        gap: "bug",
+        mustKeep: ["[/] in progress", "[?] question"],
+        mustNotHave: ["\\[/]", "\\[?]"],
+        note: "The nested item makes the list loose, so each item's text becomes its own paragraph and starts at a line break — where `[` is escaped. Real GFM tasks are unaffected because task-list lifts their marker into `listItem.checked` and the serializer re-emits it. A list mixing both, which is what a real reading queue looks like, loses the custom ones.",
     },
     {
         id: "task-with-wikilink",
