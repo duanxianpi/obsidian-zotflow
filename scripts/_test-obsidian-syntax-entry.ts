@@ -72,14 +72,19 @@ interface BaseCase {
     expect: Expect;
     /**
      * Why a case is `expect: "broken"`. The distinction is the whole point of
-     * recording it:
+     * recording it, and the three kinds want three different responses:
      *
      *   "by-design"  Zotero's note schema cannot carry the construct. Nothing
-     *                to fix here — the loss is a property of the destination.
-     *   "bug"        The pipeline could preserve it and does not. A real gap,
-     *                listed separately so it does not hide among the former.
+     *                to fix — the loss is a property of the destination.
+     *   "wont-fix"   The pipeline could preserve it and we decided not to.
+     *                A judgement that was made once, with reasons, so that it
+     *                does not have to be re-litigated by whoever reads the
+     *                failure next. The reasons belong in `note`.
+     *   "bug"        The pipeline could preserve it and does not. Actual work.
+     *
+     * Without the middle one, a settled decision reads as an outstanding task.
      */
-    gap?: "by-design" | "bug";
+    gap?: "by-design" | "wont-fix" | "bug";
     /**
      * Substrings that must appear in the round-tripped markdown for the
      * syntax to count as having survived. Checked only when the output is
@@ -731,10 +736,28 @@ group("Tasks", [
 - [-] cancelled
 - [>] deferred`,
         expect: "broken",
-        gap: "bug",
+        gap: "wont-fix",
         mustKeep: ["[/] in progress", "[?] question", "[!] important", "[-] cancelled", "[>] deferred"],
         mustNotHave: ["\\[/]", "\\[?]", "\\[!]", "\\[-]", "\\[>]"],
-        note: "Community-plugin statuses. Escaped to `\\[/]`, which Obsidian's Tasks plugin no longer recognizes. This case passed until `mustNotHave` was added: `\\[/] in progress` still *contains* `[/] in progress`, so the mustKeep alone never noticed. Second time that substring trap has hidden a real failure — see the mixed-document callout case.",
+        note:
+            "Community-plugin statuses, escaped to `\\[/]`, which the Tasks " +
+            "plugin no longer recognizes. Decided against, for three reasons " +
+            "rather than rarity — these are used. (1) It is plugin syntax, " +
+            "not Obsidian's own. (2) Nothing is destroyed: `\\[/]` renders as " +
+            "`[/]`, so it stays visible and editable. (3) The exemption could " +
+            "not be derived from CommonMark the way the `#tag` one was — `[` " +
+            "is escaped everywhere, mid-line included, because `[foo]` " +
+            "becomes a link if a definition exists anywhere in the document, " +
+            "which the serializer cannot see. The only available argument is " +
+            "that definitions cannot survive this pipeline at all, which is a " +
+            "property of the pipeline rather than of the grammar, and would " +
+            "quietly stop holding if definitions were ever supported. " +
+            "The structurally correct repair — promote the marker out of the " +
+            "text the way GFM does for `[x]` — is blocked separately: it needs " +
+            "a `listItem` stringify handler, which would shadow " +
+            "`listItemWithTaskListItem`, and that function is not exported. " +
+            "Also note this case passed until `mustNotHave` was added, since " +
+            "`\\[/] in progress` still contains `[/] in progress`.",
     },
     {
         id: "task-custom-status-mixed",
@@ -745,10 +768,10 @@ group("Tasks", [
 - [/] in progress
 - [?] question`,
         expect: "broken",
-        gap: "bug",
+        gap: "wont-fix",
         mustKeep: ["[/] in progress", "[?] question"],
         mustNotHave: ["\\[/]", "\\[?]"],
-        note: "Real GFM tasks are unaffected — task-list lifts their marker into `listItem.checked` and the serializer re-emits it — so a mixed list, which is what a reading queue looks like, keeps the standard ones and loses the plugin ones. Nothing to do with the list being loose or tight, or with GFM tasks being present: a bare `[` in text is escaped everywhere, mid-line included.",
+        note: "Why `[x]` lives where `[/]` dies, in one case. GFM's tokenizer recognizes only `[ ]`, `[x]`, `[X]` and promotes those out of the text into `listItem.checked`; the handler then rebuilds the marker itself, so it never passes through `safe()`. `[/]` is never promoted, stays text, and is escaped like any other bracket. See task-custom-status for the decision.",
     },
     {
         id: "task-with-wikilink",
@@ -871,9 +894,24 @@ bare www.example.com site`,
 
 More body.`,
         expect: "broken",
-        gap: "bug",
+        gap: "wont-fix",
         mustKeep: ["https://example.com", "https://other.com"],
-        note: "Deleted outright. A `definition` node has no HTML representation, so remark-rehype emits nothing for it, and with no reference to consume it the URL simply disappears. Unlike the referenced case this is not a canonicalization — it is content loss, and silent. Keeping a block of definitions at the foot of a note for later use is an ordinary markdown habit.",
+        note:
+            "Deleted outright: a `definition` node has no HTML representation, " +
+            "so remark-rehype emits nothing for it, and with no reference to " +
+            "consume it the URL disappears. Real loss, not canonicalization — " +
+            "but decided against, because the surrounding cases bound how much " +
+            "it can matter. A *referenced* definition is lossless (it becomes " +
+            "an inline link with the same target, still clickable on both " +
+            "sides). A mistyped label leaves the link text intact — " +
+            "`See \\[the manual]\\[manul] here.` — and the reference it " +
+            "orphaned was never a link in Obsidian either, so the note was " +
+            "already broken before syncing. That leaves only definitions " +
+            "deliberately parked for later, and preserving those would need " +
+            "the same line-start bracket claim the plugin-status case was " +
+            "turned down for. Supporting reference *syntax* properly would be " +
+            "worse still: keeping `[text][ref]` unresolved means it reaches " +
+            "Zotero as plain text instead of a working `<a href>`.",
     },
     {
         id: "image-external",
@@ -2457,24 +2495,20 @@ export async function run(argv?: string[]) {
         `  OK ${count("OK")}   KNOWN-GAP ${count("KNOWN")}   FIXED ${count("FIXED")}   FAIL ${count("FAIL")}`,
     );
 
-    // The two kinds of gap want different responses, so they are never mixed
-    // into one list: a schema limit is a fact to document, a bug is work.
-    const byDesign = known.filter((r) => r.c.gap === "by-design");
-    const bugs = known.filter((r) => r.c.gap !== "by-design");
-    if (byDesign.length) {
-        console.log(
-            `\n  Lost to Zotero's schema — nothing to fix (${byDesign.length}):`,
-        );
-        for (const r of byDesign) {
-            console.log(`    - ${pad(r.c.name, 30)} ${r.c.syntax}`);
-        }
-    }
-    if (bugs.length) {
-        console.log(
-            `\n  Lost to the pipeline — fixable (${bugs.length}):`,
-        );
-        for (const r of bugs) {
-            console.log(`    ! ${pad(r.c.name, 30)} ${r.c.syntax}`);
+    // The three kinds of gap want three different responses, so they are never
+    // mixed into one list: a schema limit is a fact, a settled decision is
+    // closed, and only the last is work.
+    const groupsOfGap: [string, string, string][] = [
+        ["by-design", "-", "Lost to Zotero's schema — nothing to fix"],
+        ["wont-fix", "·", "Decided against — see each note for why"],
+        ["bug", "!", "Lost to the pipeline — fixable"],
+    ];
+    for (const [kind, marker, heading] of groupsOfGap) {
+        const rows = known.filter((r) => (r.c.gap ?? "bug") === kind);
+        if (!rows.length) continue;
+        console.log(`\n  ${heading} (${rows.length}):`);
+        for (const r of rows) {
+            console.log(`    ${marker} ${pad(r.c.name, 30)} ${r.c.syntax}`);
         }
     }
     if (fixed.length) {

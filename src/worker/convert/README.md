@@ -500,6 +500,15 @@ allowlist) but is dropped the moment the note is edited in Zotero's own editor,
 and Zotero's own markdown parser (`fence: { block: 'codeBlock' }`) loses the
 language too.
 
+**Decided against.** These are preservable and were turned down, once, with
+reasons. They are listed apart from the bugs so a settled decision does not
+read as outstanding work; the full reasoning lives in each matrix case.
+
+| Gap | Why not |
+| --- | --- |
+| `- [/]`, `- [?]` — Tasks-plugin statuses | Plugin syntax rather than Obsidian's own; nothing is destroyed (`\[/]` renders as `[/]`); and unlike the `#tag` exemption it cannot be derived from CommonMark — `[` is escaped everywhere because `[foo]` becomes a link if a definition exists anywhere in the document, which the serializer cannot see. The structurally correct repair, promoting the marker out of the text the way GFM does for `[x]`, needs a `listItem` handler that would shadow the unexported `listItemWithTaskListItem` |
+| unreferenced `[label]: url` | Deleted outright, and that is real loss — but a *referenced* definition is lossless (it becomes an inline link with the same target), and a mistyped label keeps its link text while orphaning a reference that was never a link in Obsidian either. That leaves only definitions parked for later. Supporting reference syntax properly would be worse: an unresolved `[text][ref]` reaches Zotero as plain text instead of a working `<a href>` |
+
 **Lost to the pipeline.**
 
 | Gap | Detail |
