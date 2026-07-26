@@ -206,6 +206,26 @@ group("Internal links", [
             "it is in a cell.",
     },
     {
+        id: "wikilink-punctuation",
+        name: "WikiLink with punctuation in target",
+        syntax: "[[a&b_c*d]]",
+        md: `See [[A&B]] and [[a_b_c]] and [[q~r]] and [[p(1)]].`,
+        expect: "verbatim",
+        mustKeep: ["[[A&B]]", "[[a_b_c]]", "[[q~r]]", "[[p(1)]]"],
+        mustNotHave: ["\\&", "\\_", "\\~", "\\("],
+        note: "Adversarial guard for the escape policy. A wikilink target is matched literally by Obsidian, so any backslash inserted into it breaks resolution — `[[A\\&B]]` does not find the note `A&B`. These must stay bare even though `state.unsafe` declares several of them risky in phrasing, which is why the escape bypass cannot simply be dropped.",
+    },
+    {
+        id: "wikilink-emphasis-in-target",
+        name: "WikiLink with emphasis chars in target",
+        syntax: "[[x*y*z]]",
+        md: `See [[x*y*z]] here.`,
+        expect: "broken",
+        gap: "bug",
+        mustKeep: ["[[x*y*z]]"],
+        note: "Not an escaping problem, and not fixable at the level the other cases live at. `md2html` parses `*y*` as emphasis, so the wikilink arrives back as three siblings — text `[[x`, an `emphasis`, text `z]]` — and a scanner that works inside one text node at a time can never reassemble it. Only a real micromark construct for `[[…]]`, which would out-rank emphasis during tokenization, fixes this class. Underscores are safe by contrast (`[[a_b_c]]`) because CommonMark does not allow intraword `_` emphasis.",
+    },
+    {
         id: "wikilink-in-heading",
         name: "WikiLink in heading",
         syntax: "# [[Note]]",
@@ -1138,6 +1158,38 @@ group("Tables", [
         expect: "canonical",
         mustKeep: ["a \\| b"],
         note: "The escape must survive without accumulating backslashes.",
+    },
+    {
+        id: "table-break-plain",
+        name: "Line break in cell (control)",
+        syntax: "| a<br>b |",
+        md: `| A | B |
+| --- | --- |
+| text<br>plain | b |`,
+        expect: "canonical",
+        mustKeep: ["text", "plain"],
+        note: "Control for the two cases below. A `\\n` is unsafe inside a `tableCell`, and for an ordinary text node `safe()` encodes it as `&#xA;` — the row survives. Any difference in the next two is therefore down to how the content is serialized, not to the line break itself.",
+    },
+    {
+        id: "table-break-wikilink",
+        name: "Line break + WikiLink in cell",
+        syntax: "| a<br>[[N]] |",
+        md: `| A | B |
+| --- | --- |
+| text<br>[[link]] | b |`,
+        expect: "canonical",
+        mustKeep: ["[[link]]"],
+        note: "The scanner folds an adjacent newline into the `obsidianRaw` value, and that node used to be emitted without consulting `state.unsafe` at all — so the `\\n` reached the cell literally and the next parse split one row into two, moving `b` into a different row. Same family as the alias-pipe bug: a raw emission that ignores the construct it is in.",
+    },
+    {
+        id: "table-break-tag",
+        name: "Line break + tag in cell",
+        syntax: "| a<br>#t |",
+        md: `| A | B |
+| --- | --- |
+| text<br>#tag | b |`,
+        expect: "canonical",
+        mustKeep: ["#tag"],
     },
     {
         id: "table-empty-cells",

@@ -40,6 +40,7 @@ import { obsidianRaw } from "../model/nodes";
 import { stringifyAs } from "./types";
 
 import type { PhrasingContent, Root as MRoot } from "mdast";
+import type { Unsafe } from "mdast-util-to-markdown";
 import type { ObsidianRaw } from "../model/nodes";
 import type { SyntaxFeature } from "./types";
 
@@ -166,6 +167,47 @@ function scanObsidianInline(value: string): RawSpan[] {
 }
 
 /* ---------------------------------------------------------------- */
+/*  Serialization                                                    */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Whether an escape rule applies because of *where* this node sits rather
+ * than because of *what* it contains. Only those survive inside an
+ * `obsidianRaw` value.
+ *
+ * `mdast-util-to-markdown`'s `unsafe` list mixes two kinds of rule, and the
+ * distinction is exactly the one that matters here:
+ *
+ *   Content rules  guard against a run of text being re-read as markdown
+ *                  inline syntax. They are scoped to `phrasing` (or to no
+ *                  construct at all, via `atBreak`). Every one of them is
+ *                  wrong for this node, because being re-read is the entire
+ *                  point — `[[Note]]` must come back as a wikilink, `#tag`
+ *                  as a tag. These are dropped.
+ *
+ *   Container rules guard against breaking out of the construct the node is
+ *                  nested in: `|` and newlines inside a `tableCell`, `"`
+ *                  inside a `titleQuote`, `>` inside a `destinationLiteral`.
+ *                  They have nothing to do with our syntax and everything to
+ *                  do with not corrupting the document. These are kept.
+ *
+ * Naming characters instead — the first attempt — does not work. `[`, `!` and
+ * `#` are the ones our forms are made of, but escaping `&`, `_` or `~` breaks
+ * them just as badly: Obsidian matches a wikilink target literally, so
+ * `[[A\&B]]` does not find the note `A&B`. That list has no natural end,
+ * which is the same open-ended patching this replaced. Scoping does have one:
+ * `phrasing` is the generic "this is inline text" scope, so a rule that names
+ * only it is a content rule by construction, and anything naming a real
+ * container is not.
+ */
+function isContainerScoped(pattern: Unsafe): boolean {
+    const scope = pattern.inConstruct;
+    if (!scope) return false;
+    const names = typeof scope === "string" ? [scope] : scope;
+    return names.some((name) => name !== "phrasing");
+}
+
+/* ---------------------------------------------------------------- */
 /*  Feature                                                          */
 /* ---------------------------------------------------------------- */
 
@@ -202,22 +244,24 @@ export const obsidianSyntaxFeature: SyntaxFeature = {
             const parts: PhrasingContent[] = [];
             let last = 0;
 
+            // The span is claimed exactly as scanned. An adjacent newline used
+            // to be folded into the raw node as well, because a text node
+            // ending in `\n` beside one was normalized to a single space and
+            // pulled `[[link]]` up onto the previous line. That was a symptom
+            // of the raw node sitting outside the serializer's accounting
+            // entirely; now that it goes through `state.safe()` like anything
+            // else, the newline is handled where it belongs and the fold is
+            // unnecessary. `wikilinks-line-breaks` in the md round-trip
+            // harness is the case that originally forced it, and still passes.
             for (const span of spans) {
-                // Fold an adjacent newline into the raw node: a text node
-                // ending in `\n` beside a raw node is normalized to a single
-                // space by `mdast-util-to-markdown`'s safe() pass, which would
-                // pull `[[link]]` up onto the previous line.
-                const start =
-                    span.start > last && value[span.start - 1] === "\n"
-                        ? span.start - 1
-                        : span.start;
-                const end = value[span.end] === "\n" ? span.end + 1 : span.end;
-
-                if (start > last) {
-                    parts.push({ type: "text", value: value.slice(last, start) });
+                if (span.start > last) {
+                    parts.push({
+                        type: "text",
+                        value: value.slice(last, span.start),
+                    });
                 }
-                parts.push(obsidianRaw(value.slice(start, end)));
-                last = end;
+                parts.push(obsidianRaw(value.slice(span.start, span.end)));
+                last = span.end;
             }
 
             if (last < value.length) {
@@ -231,20 +275,39 @@ export const obsidianSyntaxFeature: SyntaxFeature = {
 
     stringifyHandlers: () => ({
         /**
-         * Emitted verbatim, bypassing the text-escape rules — except for the
-         * one character a table row still owns.
+         * Escaped normally, minus exactly the rules these forms exist to
+         * dodge.
          *
-         * Inside a cell an unescaped `|` *is* a column separator, so emitting
-         * `[[Beta|Gamma]]` raw produced markdown that the next parse read as
-         * two cells and tore the link in half (`| \[\[Beta | Gamma]] |`). That
-         * is not merely ugly: the damage was written back to Zotero and the
-         * row kept mutating on every sync. `state.stack` is how
-         * `mdast-util-gfm-table` itself detects cell context.
+         * The obvious implementation — return `node.value` and let nothing
+         * touch it — is what this replaces, and it was wrong in a way that
+         * cost data twice. `state.unsafe` is not one global list: each entry
+         * declares the construct it applies in, and `safe()` keeps only those
+         * in scope. Emitting raw opted out of *all* of them, including rules
+         * that have nothing to do with brackets:
+         *
+         *   - `{character: '|', inConstruct: 'tableCell'}` — an unescaped `|`
+         *     in a cell is a column separator, so `[[Beta|Gamma]]` serialized
+         *     to something the next parse read as two cells, tearing the link
+         *     in half as `| \[\[Beta | Gamma]] |`.
+         *   - `{character: '\n', inConstruct: 'tableCell'}` — the scanner
+         *     folds an adjacent newline into the raw value, which then split
+         *     one row into two and moved the following cell into it.
+         *
+         * Both were written back to Zotero and kept mutating on every sync,
+         * and both were found by *looking*, one at a time. Patching each as it
+         * turns up cannot converge — the set is whatever `state.unsafe` holds,
+         * and extensions add to it. So the policy is inverted here: name the
+         * three characters whose escapes must be suppressed, and let the
+         * serializer apply everything else it would normally apply.
          */
-        obsidianRaw: stringifyAs<ObsidianRaw>((node, _parent, state) =>
-            state.stack.includes("tableCell")
-                ? node.value.replace(/\|/g, "\\|")
-                : node.value,
-        ),
+        obsidianRaw: stringifyAs<ObsidianRaw>((node, _parent, state, info) => {
+            const unsafe = state.unsafe;
+            state.unsafe = unsafe.filter(isContainerScoped);
+            try {
+                return state.safe(node.value, info);
+            } finally {
+                state.unsafe = unsafe;
+            }
+        }),
     }),
 };
