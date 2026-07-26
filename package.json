@@ -17,11 +17,12 @@
         "test:csl": "node scripts/test-csl.mjs",
         "lint": "eslint .",
         "test:convert": "node scripts/test-html-roundtrip.mjs && node scripts/test-md-roundtrip.mjs",
+        "test:obsidian-syntax": "node scripts/test-obsidian-syntax.mjs",
         "test:citation-spans": "node scripts/test-citation-spans.mjs",
         "test:note-links": "node scripts/test-note-links.mjs",
         "test:persist-regions": "node scripts/test-persist-regions.mjs",
         "test:editable-regions": "node scripts/test-editable-regions.mjs",
-        "test": "npm run lint:convert && npm run test:convert && npm run test:citation-spans && npm run test:note-links && npm run test:persist-regions && npm run test:editable-regions && npm run test:csl",
+        "test": "npm run lint:convert && npm run test:convert && npm run test:obsidian-syntax && npm run test:citation-spans && npm run test:note-links && npm run test:persist-regions && npm run test:editable-regions && npm run test:csl",
         "lint:convert": "eslint src/worker/convert src/worker/services/convert.ts src/utils/note-meta.ts --max-warnings 0"
     },
     "keywords": [],

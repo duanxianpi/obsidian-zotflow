@@ -17,6 +17,7 @@ import { annotationImageFeature } from "./annotation-image";
 import { tableFeature } from "./table";
 import { listFeature } from "./list";
 import { taskListFeature } from "./task-list";
+import { calloutFeature } from "./callout";
 import { obsidianSyntaxFeature } from "./obsidian-syntax";
 import { codeBlockFeature } from "./code-block";
 import { lineBreaksFeature } from "./line-breaks";
@@ -46,6 +47,11 @@ import type {
  *  - `zotero-payloads` before `marks`: a `<span>` with both an annotation
  *    payload and a strike style must keep the payload.
  *  - `span-unwrap` last of the span claimants — it is the fallback.
+ *  - `callout` before `obsidian-syntax`: both rewrite the leading text node of
+ *    a paragraph, and the callout marker is only recognizable while that node
+ *    still starts with `[!`. Splitting a wikilink out of it first would leave
+ *    the marker in place, so the order is not load-bearing today — but it is
+ *    the order the two were reasoned about, and the cheaper one to keep true.
  */
 export const FEATURES: readonly SyntaxFeature[] = [
     noteStructureFeature,
@@ -58,6 +64,7 @@ export const FEATURES: readonly SyntaxFeature[] = [
     tableFeature,
     listFeature,
     taskListFeature,
+    calloutFeature,
     obsidianSyntaxFeature,
     codeBlockFeature,
     lineBreaksFeature,
