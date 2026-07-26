@@ -858,7 +858,22 @@ bare www.example.com site`,
 [manual]: https://help.obsidian.md`,
         expect: "canonical",
         mustKeep: ["https://help.obsidian.md"],
-        note: "Reference definitions have no HTML form; they collapse to inline links.",
+        note: "A *referenced* definition is consumed when mdast-util-to-hast resolves the reference, so the link survives as an inline one. Lossless in meaning — same target, still clickable on both sides — only the spelling changes. Contrast link-definition-unused.",
+    },
+    {
+        id: "link-definition-unused",
+        name: "Unreferenced link definition",
+        syntax: "[label]: url (unused)",
+        md: `Body paragraph here.
+
+[unused]: https://example.com
+[alsounused]: https://other.com
+
+More body.`,
+        expect: "broken",
+        gap: "bug",
+        mustKeep: ["https://example.com", "https://other.com"],
+        note: "Deleted outright. A `definition` node has no HTML representation, so remark-rehype emits nothing for it, and with no reference to consume it the URL simply disappears. Unlike the referenced case this is not a canonicalization — it is content loss, and silent. Keeping a block of definitions at the foot of a note for later use is an ordinary markdown habit.",
     },
     {
         id: "image-external",
