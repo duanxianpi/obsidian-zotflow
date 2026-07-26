@@ -227,8 +227,8 @@ Markdown 表达不了这个包装，所以 `html2md` 把该 div 的属性序列�
 
 ## 8. 转义策略
 
-这是本模块最微妙的部分，已经是三个内容销毁 bug 的来源。**动 `obsidianRaw` 之前
-请先读这一节。**
+这是本模块最微妙的部分，已经是**五个**内容销毁 bug 的来源。**在写任何逐字输出
+payload 的 handler 之前，请先读这一节。**
 
 `mdast-util-to-markdown` 会转义文本，使其不能被重新读作 markdown。
 `state.unsafe` **不是一张全局表**：每一条都声明了自己适用的 construct，`safe()`
@@ -263,8 +263,48 @@ wikilink 目标，所以 `[[A\&B]]` 找不到笔记 `A&B`。那个列表没有�
 划分有——`phrasing` 是「这是行内文本」的通用作用域，所以只写了它的规则**按定义**
 就是内容规则。
 
-`zoteroOpaqueHtml` 仍然逐字输出，而且是对的：它的值是一个完整的、已序列化的 HTML
-元素，回程时会作为 HTML 重新解析，而 Zotero 的 payload 必须逐字节存活。
+`isContainerScoped` 和 `safeInContainer` 放在 `features/types.ts`，因为另外三个
+handler 同样逐字输出 phrasing 内容、因而共享这个问题——payload span、标注图片和
+行内数学**都能落进表格单元格**：
+
+| Handler | Payload |
+| --- | --- |
+| `obsidianRaw` | Obsidian 语法 |
+| `zoteroOpaqueHtml` | 序列化后的 Zotero 元素 |
+| `zoteroAnnotationImage` | `<img>` 标签，外加一个字面 `\|` 宽度分隔符 |
+| `inlineMath` | LaTeX —— **例外，见下** |
+
+前三个用 `safeInContainer`。对它们而言 markdown 的转义是**可逆的**：GFM 表格解析器
+会在读取行内 HTML **之前**把 `\|` 还原成 `|`，所以 payload 完好抵达。
+
+**行内数学是例外，刻意不转义**，尽管单元格里的 `$a|b$` 会撕裂整行。两个 tokenizer
+的行为相反：
+
+```
+| `a \| b` |  ->  inlineCode 值 "a | b"    （已反转义）
+| $a \| b$ |  ->  inlineMath 值 "a \| b"   （反斜杠保留）
+```
+
+remark-math 把 `$…$` 当逐字内容，所以写进单元格的转义永远不会被移除，每一遍都多
+一个反斜杠。入站时把 `\|` 还原成 `|` 也不行——`\|` 是 LaTeX 的范数符号。改用
+Zotero 自己的 `<span class="math">$…$</span>` 形式则在第三个地方失败：raw span
+内部的 `$…$` 会被**再次识别成数学**并套上第二层 `<span class="math">`，每轮翻倍。
+完整分析在 `features/math.ts`；gap 记录在 §12。
+
+### 另一种形状：变换遇上裸 HTML
+
+`list.ts` 按 Zotero 编辑器的形状塑造 `<li>` / `<td>` 内容，把每段文本包进
+`<span>`。而 remark **不会**把行内 HTML 保留成一个节点——`<span …>text</span>`
+到达时是三个兄弟节点：`raw` 开标签、`text`、`raw` 闭标签——所以中间那段文本仅从
+类型上看与裸文本run 无法区分。
+
+包装它等于把一个 `<span>` 塞进了**被保留的元素内部**。下一轮入站会把该元素连同
+这层新增一起逐字捕获，把它固化进 payload；再下一轮又加一层：Zotero 侧创作的列表里
+的一个引用，**每同步一次就多一层嵌套，没有上限**。现在 `rawNesting` 会跟踪每段
+raw 片段留下几层未闭合，深度大于 0 的文本一律不动。
+
+这条教训和转义那条是同一个：**任何假定自己面对的是裸内容的变换，在有不透明
+payload 被拼接进来的地方都会出错**，而且在某个东西累积起来之前，失败是静默的。
 
 ---
 
@@ -341,7 +381,7 @@ unified 的 `Processor` 对其输入输出树是泛型的，而共享复用的�
 | 命令 | 它在问什么 |
 | --- | --- |
 | `npm run test:convert` | `test-html-roundtrip.mjs`（66 项）与 `test-md-roundtrip.mjs`（116 项）——「feature X 的行为符合设计吗？」 |
-| `npm run test:obsidian-syntax` | 113 个用例 × 2 种换行模式——「没人想到过的语法会怎么样？」 |
+| `npm run test:obsidian-syntax` | 183 个用例 × 2 种换行模式 × 双向——「没人想到过的语法会怎么样？」 |
 | `npm run lint:convert` | 本模块 eslint 零问题 |
 
 三者都包含在 `npm test` 中。
@@ -351,6 +391,18 @@ unified 的 `Processor` 对其输入输出树是泛型的，而共享复用的�
 `scripts/test-obsidian-syntax.mjs` 是一张**存活矩阵**，不是单元测试。Obsidian
 文档化的每种语法都作为独立片段喂进去，再按输出结果分类。**那里的空白是这个测试
 的目的，而不是它的疏漏。**
+
+用例通过声明源格式来选定方向：
+
+```
+md    Obsidian 创作   md → html → md → html → md
+html  Zotero 创作     html → md → html → md → html
+```
+
+两个方向都重要，而且**不是镜像**。只有第二个方向才会遇到真实的 citation payload、
+标注 span、带样式的表格和 wrapper div——span 累积和 payload-在单元格里 这两个 bug
+就是在那里发现的。跑的是**三轮**而不是两轮往返，这样「规范化一次然后稳定」和
+「漂移得足够慢、慢到两轮检查会误判为稳定」就能区分开。
 
 判定，从坏到好：
 
@@ -405,6 +457,7 @@ Zotero 自己的 markdown 解析器（`fence: { block: 'codeBlock' }`）同样�
 | Gap | 细节 |
 | --- | --- |
 | `[[x*y*z]]` | `md2html` 把 `*y*` 解析成 emphasis，于是 wikilink 以三个兄弟节点的形式回来——text、`emphasis`、text——而逐 text 节点工作的扫描永远拼不回它。只有真正的 `[[…]]` micromark construct（在 tokenize 阶段优先于 emphasis）才能解决这一类。相比之下下划线是安全的（`[[a_b_c]]`），因为 CommonMark 不允许词内 `_` 强调 |
+| 单元格里的 `$a\|b$` | 行内数学里的裸 `\|` 落在单元格里会撕裂整行并丢掉后一格。**只能从 Zotero 侧到达**——markdown 表达不出来，因为那个竖线会先结束单元格。三种候选修法各自换来另一种损坏；见 §8 和 `features/math.ts` |
 
 **已经发布的行为变更**，列在此处以免把一次性同步 diff 误认成 bug：
 

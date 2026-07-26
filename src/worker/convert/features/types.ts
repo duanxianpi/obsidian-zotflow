@@ -28,6 +28,7 @@ import type { Element } from "hast";
 import type {
     Handle as StringifyHandle,
     State as StringifyState,
+    Unsafe,
 } from "mdast-util-to-markdown";
 
 /** Everything a feature may vary its behaviour on. */
@@ -89,6 +90,67 @@ export function stringifyAs<T>(
     ) => string,
 ): StringifyHandle {
     return fn as StringifyHandle;
+}
+
+/**
+ * Whether an escape rule applies because of *where* a node sits rather than
+ * because of *what* it contains.
+ *
+ * `mdast-util-to-markdown`'s `unsafe` list mixes two kinds of rule, and the
+ * distinction is what several handlers here need:
+ *
+ *   Content rules  guard against a run of text being re-read as markdown
+ *                  inline syntax. They are scoped to `phrasing`, or to no
+ *                  construct at all via `atBreak`. A handler that emits a
+ *                  verbatim payload — Obsidian syntax, Zotero HTML, a math
+ *                  span — wants to be re-read, so these are wrong for it.
+ *
+ *   Container rules guard against breaking out of the construct the node is
+ *                  nested in: `|` and newlines inside a `tableCell`, `"`
+ *                  inside a `titleQuote`, `>` inside a `destinationLiteral`.
+ *                  They have nothing to do with the payload's own syntax and
+ *                  everything to do with not corrupting the document.
+ *
+ * `phrasing` is the generic "this is inline text" scope, so a rule naming only
+ * it is a content rule by construction — which is what gives this predicate a
+ * natural boundary. Enumerating characters instead does not: `[`, `!` and `#`
+ * are what Obsidian's forms are made of, but escaping `&`, `_` or `~` breaks
+ * them just as badly, and that list has no end.
+ */
+export function isContainerScoped(pattern: Unsafe): boolean {
+    const scope = pattern.inConstruct;
+    if (!scope) return false;
+    const names = typeof scope === "string" ? [scope] : scope;
+    return names.some((name) => name !== "phrasing");
+}
+
+/**
+ * Serialize a verbatim payload, applying only the escapes its surroundings
+ * demand.
+ *
+ * Returning a payload untouched is the obvious implementation and it has cost
+ * data twice: an unescaped `|` inside a table cell tore `[[Beta|Gamma]]` into
+ * two cells, and an unescaped newline split one row into two. Both were
+ * written back to Zotero and kept mutating on every sync. Patching each rule
+ * as it is noticed cannot converge — the set is whatever `state.unsafe` holds,
+ * and extensions add to it — so the filtering is stated as a policy instead.
+ *
+ * `state.unsafe` is restored in a `finally`: it is shared for the duration of
+ * one serialization, and the nested `toMarkdown` call used for tables runs on
+ * its own state, so the swap cannot leak across either boundary.
+ */
+export function safeInContainer(
+    state: StringifyState,
+    info: Parameters<StringifyHandle>[3],
+    value: string,
+): string {
+    const unsafe = state.unsafe;
+    state.unsafe = unsafe.filter(isContainerScoped);
+    try {
+        return state.safe(value, info);
+    } finally {
+        state.unsafe = unsafe;
+    }
 }
 
 export interface SyntaxFeature {

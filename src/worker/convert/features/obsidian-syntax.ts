@@ -37,10 +37,9 @@
 import { visit, SKIP } from "unist-util-visit";
 
 import { obsidianRaw } from "../model/nodes";
-import { stringifyAs } from "./types";
+import { safeInContainer, stringifyAs } from "./types";
 
 import type { PhrasingContent, Root as MRoot } from "mdast";
-import type { Unsafe } from "mdast-util-to-markdown";
 import type { ObsidianRaw } from "../model/nodes";
 import type { SyntaxFeature } from "./types";
 
@@ -170,43 +169,6 @@ function scanObsidianInline(value: string): RawSpan[] {
 /*  Serialization                                                    */
 /* ---------------------------------------------------------------- */
 
-/**
- * Whether an escape rule applies because of *where* this node sits rather
- * than because of *what* it contains. Only those survive inside an
- * `obsidianRaw` value.
- *
- * `mdast-util-to-markdown`'s `unsafe` list mixes two kinds of rule, and the
- * distinction is exactly the one that matters here:
- *
- *   Content rules  guard against a run of text being re-read as markdown
- *                  inline syntax. They are scoped to `phrasing` (or to no
- *                  construct at all, via `atBreak`). Every one of them is
- *                  wrong for this node, because being re-read is the entire
- *                  point — `[[Note]]` must come back as a wikilink, `#tag`
- *                  as a tag. These are dropped.
- *
- *   Container rules guard against breaking out of the construct the node is
- *                  nested in: `|` and newlines inside a `tableCell`, `"`
- *                  inside a `titleQuote`, `>` inside a `destinationLiteral`.
- *                  They have nothing to do with our syntax and everything to
- *                  do with not corrupting the document. These are kept.
- *
- * Naming characters instead — the first attempt — does not work. `[`, `!` and
- * `#` are the ones our forms are made of, but escaping `&`, `_` or `~` breaks
- * them just as badly: Obsidian matches a wikilink target literally, so
- * `[[A\&B]]` does not find the note `A&B`. That list has no natural end,
- * which is the same open-ended patching this replaced. Scoping does have one:
- * `phrasing` is the generic "this is inline text" scope, so a rule that names
- * only it is a content rule by construction, and anything naming a real
- * container is not.
- */
-function isContainerScoped(pattern: Unsafe): boolean {
-    const scope = pattern.inConstruct;
-    if (!scope) return false;
-    const names = typeof scope === "string" ? [scope] : scope;
-    return names.some((name) => name !== "phrasing");
-}
-
 /* ---------------------------------------------------------------- */
 /*  Feature                                                          */
 /* ---------------------------------------------------------------- */
@@ -275,39 +237,12 @@ export const obsidianSyntaxFeature: SyntaxFeature = {
 
     stringifyHandlers: () => ({
         /**
-         * Escaped normally, minus exactly the rules these forms exist to
-         * dodge.
-         *
-         * The obvious implementation — return `node.value` and let nothing
-         * touch it — is what this replaces, and it was wrong in a way that
-         * cost data twice. `state.unsafe` is not one global list: each entry
-         * declares the construct it applies in, and `safe()` keeps only those
-         * in scope. Emitting raw opted out of *all* of them, including rules
-         * that have nothing to do with brackets:
-         *
-         *   - `{character: '|', inConstruct: 'tableCell'}` — an unescaped `|`
-         *     in a cell is a column separator, so `[[Beta|Gamma]]` serialized
-         *     to something the next parse read as two cells, tearing the link
-         *     in half as `| \[\[Beta | Gamma]] |`.
-         *   - `{character: '\n', inConstruct: 'tableCell'}` — the scanner
-         *     folds an adjacent newline into the raw value, which then split
-         *     one row into two and moved the following cell into it.
-         *
-         * Both were written back to Zotero and kept mutating on every sync,
-         * and both were found by *looking*, one at a time. Patching each as it
-         * turns up cannot converge — the set is whatever `state.unsafe` holds,
-         * and extensions add to it. So the policy is inverted here: name the
-         * three characters whose escapes must be suppressed, and let the
-         * serializer apply everything else it would normally apply.
+         * Escaped normally, minus the rules these forms exist to dodge —
+         * see `safeInContainer`. `[[Beta|Gamma]]` in a table cell is what
+         * proved that emitting the value untouched is not an option.
          */
-        obsidianRaw: stringifyAs<ObsidianRaw>((node, _parent, state, info) => {
-            const unsafe = state.unsafe;
-            state.unsafe = unsafe.filter(isContainerScoped);
-            try {
-                return state.safe(node.value, info);
-            } finally {
-                state.unsafe = unsafe;
-            }
-        }),
+        obsidianRaw: stringifyAs<ObsidianRaw>((node, _parent, state, info) =>
+            safeInContainer(state, info, node.value),
+        ),
     }),
 };

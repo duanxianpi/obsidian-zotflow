@@ -14,7 +14,7 @@ import { toHtml } from "hast-util-to-html";
 
 import { opaqueHtml } from "../model/nodes";
 import { classNames, styleStr } from "./element";
-import { PASS, stringifyAs } from "./types";
+import { PASS, safeInContainer, stringifyAs } from "./types";
 
 import type { ZoteroOpaqueHtml } from "../model/nodes";
 import type { SyntaxFeature } from "./types";
@@ -58,10 +58,21 @@ export const zoteroPayloadFeature: SyntaxFeature = {
 
     stringifyHandlers: () => ({
         /**
-         * Emitted verbatim — no escaping. Re-parsed as HTML on the way back
-         * in, which is what makes the payload survive round-trips.
+         * Emitted verbatim, so the payload is re-parsed as HTML on the way
+         * back in and survives arbitrarily many round-trips — except for the
+         * escapes the surrounding construct demands.
+         *
+         * Only container rules apply here (see `safeInContainer`), and they
+         * are all safe on raw HTML: `\|` in a table cell is unescaped by the
+         * GFM table parser before the inline HTML is read, so the payload
+         * arrives intact. Skipping them is not safe: a citation whose visible
+         * text contains a `|`, or an annotation containing a `<br>`, used to
+         * tear its own table row apart.
          */
-        zoteroOpaqueHtml: stringifyAs<ZoteroOpaqueHtml>((node) => node.value),
+        zoteroOpaqueHtml: stringifyAs<ZoteroOpaqueHtml>(
+            (node, _parent, state, info) =>
+                safeInContainer(state, info, node.value),
+        ),
     }),
 };
 

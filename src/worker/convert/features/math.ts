@@ -66,7 +66,36 @@ export const mathFeature: SyntaxFeature = {
     }),
 
     stringifyHandlers: () => ({
+        /**
+         * Emitted with no escaping, which is right everywhere except one
+         * shape: inline math containing a literal `|`, inside a table cell.
+         * There the pipe is a column separator and the row is torn apart.
+         *
+         * That shape is left unfixed, deliberately, because all three
+         * candidate repairs trade it for a different corruption:
+         *
+         *   Escape the pipe, as `mdast-util-gfm-table` does for inline code.
+         *   The tokenizers disagree, so it does not survive:
+         *       | `a \| b` |  ->  inlineCode value "a | b"    (unescaped)
+         *       | $a \| b$ |  ->  inlineMath value "a \| b"   (kept)
+         *   remark-math takes `$…$` verbatim, so the backslash is never
+         *   removed and one more is added on every pass.
+         *
+         *   Normalize `\|` back to `|` on the way in. `\|` is the LaTeX norm
+         *   symbol, so this silently rewrites `$\|x\|$`.
+         *
+         *   Emit Zotero's own `<span class="math">$…$</span>` form, whose
+         *   text unescapes normally. The `$…$` inside the raw span is then
+         *   re-parsed as math and wrapped in a second `<span class="math">`,
+         *   doubling the nesting on every pass.
+         *
+         * So the escape is left off and the gap recorded — see the
+         * `vh-math-*-cell` cases in the syntax matrix. The other verbatim
+         * handlers do not share the problem: their payloads are HTML or plain
+         * text, where markdown's own escaping is reversible.
+         */
         inlineMath: stringifyAs<InlineMath>((node) => `$${node.value}$`),
+        /** Block-level: never inside a cell, so nothing to escape against. */
         math: stringifyAs<Math>((node) => `$$\n${node.value}\n$$`),
     }),
 

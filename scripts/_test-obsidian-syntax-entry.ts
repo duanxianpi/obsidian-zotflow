@@ -61,15 +61,13 @@ type Verdict = "VERBATIM" | "CANONICAL" | "BROKEN" | "DRIFT";
 /** The best verdict this case is currently known to reach. */
 type Expect = "verbatim" | "canonical" | "broken";
 
-interface Case {
+interface BaseCase {
     /** Filter key. */
     id: string;
     /** Human-readable name, as it appears in the report. */
     name: string;
     /** Compact display form of the syntax, for the summary table. */
     syntax: string;
-    /** The markdown snippet under test. */
-    md: string;
     /** Reviewed current behaviour — see the header. */
     expect: Expect;
     /**
@@ -92,6 +90,30 @@ interface Case {
     mustNotHave?: string[];
     /** Why this case exists, or why it is expected to be broken. */
     note?: string;
+}
+
+/**
+ * A case declares its source format, and that choice picks the direction.
+ *
+ *   `md`    Obsidian authored it.  md → html → md → html → md
+ *   `html`  Zotero authored it.    html → md → html → md → html
+ *
+ * Both directions matter and they are not mirror images. A note written in
+ * Obsidian and synced up exercises the first; a note written in Zotero's own
+ * editor and pulled down exercises the second, and only that one sees real
+ * citation payloads, annotation spans, styled tables and the wrapper div.
+ *
+ * The union makes the two mutually exclusive rather than leaving a `source`
+ * field whose meaning depends on a sibling flag.
+ */
+type Case = BaseCase &
+    ({ md: string; html?: never } | { html: string; md?: never });
+
+/** Source text and the direction it implies. */
+function sourceOf(c: Case): { text: string; from: "md" | "html" } {
+    return c.md !== undefined
+        ? { text: c.md, from: "md" }
+        : { text: c.html!, from: "html" };
 }
 
 const GROUPS: { group: string; cases: Case[] }[] = [];
@@ -1326,6 +1348,768 @@ x = [[1, 2], [3, 4]]
 ]);
 
 /* ================================================================ */
+/*  13. Zotero-authored notes  (html → md → html)                   */
+/* ================================================================ */
+
+/** URL-encoded JSON, the shape Zotero stores span payloads in. */
+function payload(value: unknown): string {
+    return encodeURIComponent(JSON.stringify(value));
+}
+
+const ANNOTATION = payload({
+    attachmentURI: "http://zotero.org/users/12345/items/ATTACH01",
+    annotationKey: "ANNOKEY1",
+    color: "#ffd400",
+    pageLabel: "5",
+    position: { pageIndex: 4, rects: [[1, 2, 3, 4]] },
+    citationItem: { uris: ["http://zotero.org/users/12345/items/ITEMKEY1"] },
+});
+
+const CITATION = payload({
+    citationItems: [
+        {
+            uris: ["http://zotero.org/users/12345/items/ITEMKEY1"],
+            locator: "5",
+        },
+    ],
+    properties: {},
+});
+
+group("Zotero-authored notes", [
+    {
+        id: "zh-wrapper",
+        name: "Wrapper div",
+        syntax: "<div data-schema-version>",
+        html: `<div data-schema-version="9" data-citation-items="%5B%5D"><p>Body text.</p></div>`,
+        expect: "verbatim",
+        mustKeep: ['data-schema-version="9"', "Body text."],
+        note: "The wrapper is lifted into a `ZF_NOTE_META` comment and rebuilt on the way back. Its attributes must survive verbatim — `data-citation-items` can hold the note's entire citation metadata.",
+    },
+    {
+        id: "zh-citation-span",
+        name: "Citation span",
+        syntax: '<span class="citation">',
+        html: `<p>As shown <span class="citation" data-citation="${CITATION}"><span class="citation-item">(Doe, 2020, p. 5)</span></span> here.</p>`,
+        expect: "verbatim",
+        mustKeep: [`data-citation="${CITATION}"`, "citation-item"],
+        note: "The payload is the note's only record of what was cited. It must come back byte-for-byte, nested `citation-item` span included.",
+    },
+    {
+        id: "zh-highlight-span",
+        name: "Highlight annotation span",
+        syntax: '<span class="highlight">',
+        html: `<p><span class="highlight" data-annotation="${ANNOTATION}">quoted text</span> <span class="citation" data-citation="${CITATION}">(Doe, 2020)</span></p>`,
+        expect: "verbatim",
+        mustKeep: [`data-annotation="${ANNOTATION}"`, "quoted text"],
+        note: "Zotero emits a highlight and its citation as adjacent spans. Both payloads must survive, and the whitespace between them must not collapse the pair.",
+    },
+    {
+        id: "zh-underline-annotation",
+        name: "Underline WITH data-annotation",
+        syntax: '<span class="underline" data-annotation>',
+        html: `<p><span class="underline" data-annotation="${ANNOTATION}">underlined quote</span></p>`,
+        expect: "verbatim",
+        mustKeep: [`data-annotation="${ANNOTATION}"`],
+        mustNotHave: ["<u>"],
+        note: "Must stay an opaque payload, not become a `<u>` mark. The `data-annotation` attribute is the only thing distinguishing it from a plain underline — see the guard in zotero-payloads.ts.",
+    },
+    {
+        id: "zh-underline-plain",
+        name: "Plain <u> without payload",
+        syntax: "<u>",
+        html: `<p><u>just underlined</u></p>`,
+        expect: "verbatim",
+        mustKeep: ["<u>just underlined</u>"],
+        mustNotHave: ["data-annotation"],
+        note: "The other half of zh-underline-annotation: with no payload it is an ordinary mark and must round-trip as `<u>`.",
+    },
+    {
+        id: "zh-colored-text",
+        name: "Text colour span",
+        syntax: '<span style="color">',
+        html: `<p><span style="color: #ff6666">red text</span> and <span style="background-color: #ffd400">highlighted</span></p>`,
+        expect: "verbatim",
+        mustKeep: ["color: #ff6666", "background-color: #ffd400"],
+        note: "Markdown has no colour. Preserved as opaque HTML with reason `colored-text`.",
+    },
+    {
+        id: "zh-strike-span",
+        name: "Strike as styled span",
+        syntax: "text-decoration: line-through",
+        html: `<p><span style="text-decoration: line-through">struck out</span></p>`,
+        expect: "verbatim",
+        mustKeep: ["line-through", "struck out"],
+        note: "Zotero expresses strike as a styled span, not `<del>`. Maps to `~~` and must come back as the span, not as `<del>`.",
+    },
+    {
+        id: "zh-payload-and-strike",
+        name: "Annotation payload AND strike style",
+        syntax: 'class="highlight" style="…line-through"',
+        html: `<p><span class="highlight" data-annotation="${ANNOTATION}" style="text-decoration: line-through">both</span></p>`,
+        expect: "verbatim",
+        mustKeep: [`data-annotation="${ANNOTATION}"`],
+        note: "Ordering guard: `zotero-payloads` is registered before `marks`, so the payload claims this span. If the order flipped, the annotation JSON would be silently dropped in favour of `~~both~~`.",
+    },
+    {
+        id: "zh-math-inline",
+        name: "Zotero inline math",
+        syntax: '<span class="math">',
+        html: `<p>Formula <span class="math">$e^{i\\pi}+1=0$</span> inline.</p>`,
+        expect: "verbatim",
+        mustKeep: ['class="math"', "e^{i\\pi}+1=0"],
+        note: "Ordering guard: `math` is registered before `zotero-payloads` and `span-unwrap`, either of which would otherwise swallow a `<span class=\"math\">`.",
+    },
+    {
+        id: "zh-math-display",
+        name: "Zotero display math",
+        syntax: '<pre class="math">',
+        html: `<pre class="math">$$\\int_0^1 x^2 dx$$</pre>`,
+        expect: "verbatim",
+        mustKeep: ['<pre class="math">', "\\int_0^1 x^2 dx"],
+        note: "A `<pre>` WITH the math class is math; without it, a code block. Both handlers are registered for `pre` and the math one declines via PASS when the class is absent.",
+    },
+    {
+        id: "zh-annotation-image",
+        name: "Annotation image",
+        syntax: "<img data-attachment-key>",
+        html: `<p><img data-attachment-key="IMGKEY01" data-annotation="${ANNOTATION}" width="576"></p>`,
+        expect: "canonical",
+        mustKeep: ['data-attachment-key="IMGKEY01"', 'width="576"'],
+        note: "Every `data-*` attribute Zotero needs rides in the markdown image's alt text. Without a configured folder there is no extracted PNG to point at, so the node serializes as the bare tag.",
+    },
+    {
+        id: "zh-plain-image",
+        name: "Plain image (no payload)",
+        syntax: "<img src>",
+        html: `<p><img src="https://example.com/a.png" alt="cap"></p>`,
+        expect: "verbatim",
+        mustKeep: ["https://example.com/a.png"],
+        note: "The other half of zh-annotation-image: no annotation data means the handler declines and rehype-remark produces an ordinary markdown image.",
+    },
+    {
+        id: "zh-li-spans",
+        name: "List items wrapped in spans",
+        syntax: "<li><span>",
+        html: `<ul><li><span>first</span></li><li><span>second</span></li></ul>`,
+        expect: "canonical",
+        mustKeep: ["first", "second"],
+        note: "The shape Zotero's own editor emits. Round-tripping must reproduce it, or every Zotero-authored list shows a diff on the first sync.",
+    },
+    {
+        id: "zh-td-spans",
+        name: "Table cells wrapped in spans",
+        syntax: "<td><span>",
+        html: `<table><tr><td><span>a</span></td><td><span>b</span></td></tr></table>`,
+        expect: "canonical",
+        mustKeep: ["a", "b"],
+    },
+    {
+        id: "zh-styled-table",
+        name: "Table with cell styles",
+        syntax: "<td style>",
+        html: `<table><tr><td style="background-color: #ffd400">tinted</td><td>plain</td></tr></table>`,
+        expect: "canonical",
+        mustKeep: ["background-color: #ffd400", "tinted"],
+        note: "GFM has no cell styling, so a styled table is preserved whole as opaque HTML rather than silently losing the formatting.",
+    },
+    {
+        id: "zh-headerless-table",
+        name: "Headerless table",
+        syntax: "<table> with no <th>",
+        html: `<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>`,
+        expect: "canonical",
+        mustKeep: ["a", "b", "c", "d"],
+        note: "Zotero's schema allows a table with no header row; GFM does not. Tagged during conversion and given `<!-- -->` placeholder header cells at serialization time.",
+    },
+    {
+        id: "zh-code-block",
+        name: "Zotero code block",
+        syntax: "<pre>",
+        html: `<pre>const a = 1;\nconst b = [[2]];</pre>`,
+        expect: "verbatim",
+        mustKeep: ["const a = 1;", "const b = [[2]];"],
+        note: "`[[2]]` inside the fence must not be claimed as a wikilink. On the mdast a fence is one opaque `code` node the syntax passes never visit.",
+    },
+    {
+        id: "zh-blockquote",
+        name: "Zotero blockquote",
+        syntax: "<blockquote>",
+        html: `<blockquote><p>Quoted paragraph.</p></blockquote>`,
+        expect: "canonical",
+        mustKeep: ["Quoted paragraph."],
+    },
+    {
+        id: "zh-nested-marks",
+        name: "Nested inline marks",
+        syntax: "<u><strong><a>",
+        html: `<p><u>a <strong>b</strong> <a href="https://example.com">c</a></u></p>`,
+        expect: "verbatim",
+        mustKeep: ["<u>", "https://example.com"],
+        note: "Regression guard: `<u>` used to keep only `toText()`, so the nested link lost its URL. It is a phrasing container now.",
+    },
+    {
+        id: "zh-sub-sup",
+        name: "Subscript and superscript",
+        syntax: "<sub> <sup>",
+        html: `<p>H<sub>2</sub>O and x<sup>2</sup></p>`,
+        expect: "verbatim",
+        mustKeep: ["<sub>2</sub>", "<sup>2</sup>"],
+    },
+    {
+        id: "zh-empty-paragraphs",
+        name: "Empty paragraphs",
+        syntax: "<p></p>",
+        html: `<p>before</p><p></p><p></p><p>after</p>`,
+        expect: "canonical",
+        mustKeep: ["before", "after"],
+        note: "Zotero emits empty paragraphs as spacing. Markdown has no place for them, so they are dropped — and runs of them must not accumulate across syncs.",
+    },
+    {
+        id: "zh-orphan-inline",
+        name: "Inline element at the root",
+        syntax: "<span> at root",
+        html: `<span>orphaned</span><p>normal</p>`,
+        expect: "canonical",
+        mustKeep: ["orphaned", "normal"],
+        note: "Zotero can leave a span or img directly under the root. Wrapped in a `<p>` before rehype-remark sees the tree.",
+    },
+    {
+        id: "zh-numeric-charrefs",
+        name: "Double-encoded character reference",
+        syntax: "&amp;#x20;",
+        html: `<p>a&amp;#x20;b and Tom &amp; Jerry</p>`,
+        expect: "canonical",
+        mustKeep: ["a b", "Jerry"],
+        mustNotHave: ["&#x20;", "&amp;#x26;"],
+        note: "Zotero emits single character references at inline-mark boundaries; a prior round trip can double-encode them, and rehype-parse then decodes one level into the literal text `&#x20;`. Left alone that re-escapes into a broken reference visible in Zotero, so the note self-heals — `a&amp;#x20;b` comes back as `a b`. The surviving `&` is re-encoded as `&#x26;`, which is correct HTML output; what matters is that it encodes exactly once, and the DRIFT check is what enforces that.",
+    },
+    {
+        id: "zh-br-whitespace",
+        name: "Newlines around <br>",
+        syntax: "\\n<br>\\n",
+        html: `<p>line one\n<br>\nline two</p>`,
+        expect: "canonical",
+        mustKeep: ["line one", "line two"],
+        note: "HTML pretty-printing leaves newline-only text nodes on either side of a `<br>`. They are dropped; a run of spaces is NOT, because Zotero uses those for alignment.",
+    },
+    {
+        id: "zh-full-note",
+        name: "Realistic Zotero note",
+        syntax: "(everything)",
+        html:
+            `<div data-schema-version="9" data-citation-items="%5B%5D">` +
+            `<h1>Reading notes</h1>` +
+            `<p><span class="highlight" data-annotation="${ANNOTATION}">a quoted passage</span> ` +
+            `<span class="citation" data-citation="${CITATION}">(Doe, 2020, p. 5)</span></p>` +
+            `<ul><li><span>point one</span></li><li><span>point two</span></li></ul>` +
+            `<p>Formula <span class="math">$x^2$</span> and <span style="color: #ff6666">red</span>.</p>` +
+            `<pre>code(); // [[not a wikilink]]</pre>` +
+            `</div>`,
+        expect: "canonical",
+        mustKeep: [
+            `data-annotation="${ANNOTATION}"`,
+            `data-citation="${CITATION}"`,
+            'data-schema-version="9"',
+            "point one",
+            'class="math"',
+            "color: #ff6666",
+            "[[not a wikilink]]",
+        ],
+        note: "End-to-end for the Zotero direction. Every payload, the wrapper, the span-wrapped list, math, colour and a fence containing wikilink-looking text, in one note.",
+    },
+]);
+
+/* ================================================================ */
+/*  14. Obsidian syntax inside every container                      */
+/* ================================================================ */
+
+/*
+ * The scanner works one text node at a time, so what encloses that node
+ * decides both which escapes apply and whether the node survives at all as a
+ * single run. Each container is a different answer, and the two that already
+ * produced data loss — a table cell and a line break — were found only by
+ * looking. This grid removes the guesswork.
+ */
+group("Syntax in containers", [
+    {
+        id: "ctr-blockquote-all",
+        name: "All forms in a blockquote",
+        syntax: "> [[…]] #t ^[…]",
+        md: `> Linked [[Alpha]], tagged #beta, noted.^[a footnote] and ![[Gamma.png]]`,
+        expect: "verbatim",
+        mustKeep: ["[[Alpha]]", "#beta", "^[a footnote]", "![[Gamma.png]]"],
+        mustNotHave: ["\\[", "\\#"],
+    },
+    {
+        id: "ctr-nested-blockquote",
+        name: "All forms in a nested blockquote",
+        syntax: "> > [[…]]",
+        md: `> outer
+> > Linked [[Alpha]] and tagged #beta`,
+        expect: "canonical",
+        mustKeep: ["[[Alpha]]", "#beta"],
+        mustNotHave: ["\\[", "\\#"],
+    },
+    {
+        id: "ctr-callout-body",
+        name: "All forms in a callout body",
+        syntax: "> [!note] … [[…]]",
+        md: `> [!note] See [[Alpha]]
+> Tagged #beta and noted.^[a footnote]`,
+        expect: "verbatim",
+        mustKeep: ["[!note] See [[Alpha]]", "#beta", "^[a footnote]"],
+        mustNotHave: ["\\[", "\\#"],
+        note: "The callout marker and a wikilink share one paragraph's leading text node — callout claims the marker, obsidian-syntax splits the rest.",
+    },
+    {
+        id: "ctr-table-all",
+        name: "All forms in table cells",
+        syntax: "| [[…]] | #t |",
+        md: `| A | B |
+| --- | --- |
+| [[Alpha]] | #beta |
+| ^[a footnote] | ![[Gamma.png]] |`,
+        expect: "canonical",
+        mustKeep: ["[[Alpha]]", "#beta", "^[a footnote]", "![[Gamma.png]]"],
+        note: "A table cell is the construct that broke twice: an unescaped `|` and an unescaped newline both tore rows apart.",
+    },
+    {
+        id: "ctr-heading-all",
+        name: "All forms in a heading",
+        syntax: "## [[…]] #t",
+        md: `## See [[Alpha]] and #beta`,
+        expect: "verbatim",
+        mustKeep: ["[[Alpha]]", "#beta"],
+        mustNotHave: ["\\["],
+        note: "A heading already begins with `#`, so a tag inside one exercises the heading-escape rule from the other side.",
+    },
+    {
+        id: "ctr-task-all",
+        name: "All forms in a task item",
+        syntax: "- [ ] [[…]] #t",
+        md: `- [ ] Read [[Alpha]] #beta
+- [x] Done ^[a footnote]`,
+        expect: "canonical",
+        mustKeep: ["[ ] Read [[Alpha]] #beta", "[x] Done ^[a footnote]"],
+        mustNotHave: ["\\[["],
+        note: "Two features rewrite the same leading text node here: task-list lifts the `[x]` marker out, obsidian-syntax splits what remains.",
+    },
+    {
+        id: "ctr-nested-list",
+        name: "All forms in a deeply nested list",
+        syntax: "- - - [[…]]",
+        md: `- one
+    - two
+        - three [[Alpha]] #beta
+            - four ^[a footnote]`,
+        expect: "canonical",
+        mustKeep: ["[[Alpha]]", "#beta", "^[a footnote]"],
+        mustNotHave: ["\\["],
+    },
+    {
+        id: "ctr-emphasis-wrapped",
+        name: "All forms inside emphasis",
+        syntax: "**[[…]]** *#t*",
+        md: `**[[Alpha]]** and *#beta* and ~~^[a footnote]~~`,
+        expect: "verbatim",
+        mustKeep: ["[[Alpha]]", "#beta", "^[a footnote]"],
+        mustNotHave: ["\\["],
+        note: "Emphasis puts the text node inside `fullPhrasingSpans`, which changes which unsafe patterns are in scope.",
+    },
+    {
+        id: "ctr-link-label",
+        name: "WikiLink inside a link label",
+        syntax: "[[[A]]](url)",
+        md: `See [text [[Alpha]] more](https://example.com) here.`,
+        expect: "canonical",
+        mustKeep: ["https://example.com"],
+        note: "A link label is one of the few constructs where escaping `[` is genuinely required, so the container-scoped policy keeps that rule while dropping the phrasing one. Whatever the outcome, it must converge.",
+    },
+    {
+        id: "ctr-code-immunity",
+        name: "All forms inside code (must NOT be claimed)",
+        syntax: "`[[…]]` ``` #t",
+        md: "Inline `[[Alpha]]` `#beta` `^[fn]` `![[E.png]]`\n\n```\n[[Alpha]]\n#beta\n^[fn]\n![[E.png]]\n> [!note]\n```",
+        expect: "verbatim",
+        mustKeep: [
+            "`[[Alpha]]`",
+            "`#beta`",
+            "`^[fn]`",
+            "`![[E.png]]`",
+            "\n[[Alpha]]\n#beta\n^[fn]\n![[E.png]]\n> [!note]\n",
+        ],
+        note: "The corruption regression, extended to every claimed form at once. None may be touched inside inline code or a fence.",
+    },
+]);
+
+/* ================================================================ */
+/*  15. Adversarial and pathological input                          */
+/* ================================================================ */
+
+group("Adversarial", [
+    {
+        id: "adv-note-meta-in-body",
+        name: "ZF_NOTE_META inside the body",
+        syntax: "<!-- ZF_NOTE_META … -->",
+        md: `Real text.
+
+<!-- ZF_NOTE_META data-schema-version="9" -->
+
+More text.`,
+        expect: "verbatim",
+        mustKeep: ["Real text.", "More text."],
+        note: "The marker is machine-owned and matched only at offset 0. One in the body must not be mistaken for the wrapper's, which would inject a bogus `<div>` and swallow the note.",
+    },
+    {
+        id: "adv-note-meta-first-line",
+        name: "ZF_NOTE_META written by hand at the top",
+        syntax: "leading ZF_NOTE_META",
+        md: `<!-- ZF_NOTE_META data-schema-version="9" -->
+
+Body.`,
+        expect: "canonical",
+        mustKeep: ["Body."],
+        note: "Anchored at offset 0, so this one IS consumed and rebuilt as a wrapper div. It must at least converge rather than nest a wrapper per pass.",
+    },
+    {
+        id: "adv-editable-marker",
+        name: "ZF_*_BEG marker in the body",
+        syntax: "<!-- ZF_ANNO_BEG_x -->",
+        md: `<!-- ZF_ANNO_BEG_abc123 -->
+content
+<!-- ZF_ANNO_END_abc123 -->`,
+        expect: "canonical",
+        mustKeep: ["ZF_ANNO_BEG_abc123", "content", "ZF_ANNO_END_abc123"],
+        note: "The CM6 editable-region extension keys on these. They are ordinary HTML comments to the converter and must survive unchanged.",
+    },
+    {
+        id: "adv-span-link-class",
+        name: "zotflow-span-link written by hand",
+        syntax: 'class="zotflow-span-link"',
+        html: `<p><a class="zotflow-span-link" href="https://example.com">text</a></p>`,
+        expect: "canonical",
+        mustKeep: ["text"],
+        note: "The outbound strip is an unconditional string replace keyed on this class. A hand-written anchor carrying it will be unwrapped — check that this at least converges and keeps the text.",
+    },
+    {
+        id: "adv-backslash-run",
+        name: "Link opener followed by backslashes",
+        syntax: "](\\\\\\\\\\\\…",
+        md: `text ](\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\ and no closing paren`,
+        expect: "canonical",
+        mustKeep: ["and no closing paren"],
+        note: "`link.ts`'s postSerializeMd scans `](…)` destinations. Its pattern must keep the alternatives disjoint — an ambiguous `(?:\\\\.|[^()\\s])+` backtracks exponentially on exactly this input. A hang here is the failure mode, not a wrong answer.",
+    },
+    {
+        id: "adv-deep-nesting",
+        name: "Deeply nested lists and quotes",
+        syntax: "10 levels",
+        md: `- 1
+    - 2
+        - 3
+            - 4
+                - 5
+                    - 6
+                        - 7
+                            - 8
+                                - 9 [[Alpha]]`,
+        expect: "canonical",
+        mustKeep: ["[[Alpha]]"],
+    },
+    {
+        id: "adv-unclosed-html",
+        name: "Unclosed tags",
+        syntax: "<u>… (no close)",
+        html: `<p><u>never closed<p>next paragraph</p>`,
+        expect: "canonical",
+        mustKeep: ["never closed", "next paragraph"],
+        note: "rehype-parse repairs this the way a browser would. Whatever shape it settles on must be stable.",
+    },
+    {
+        id: "adv-empty-doc",
+        name: "Empty document",
+        syntax: "(empty)",
+        md: ``,
+        expect: "verbatim",
+        note: "Degenerate input must not throw or grow content.",
+    },
+    {
+        id: "adv-whitespace-only",
+        name: "Whitespace-only document",
+        syntax: "(spaces)",
+        md: `   \n\n   \n`,
+        expect: "verbatim",
+    },
+    {
+        id: "adv-nbsp-run",
+        name: "Non-breaking space runs",
+        syntax: "&nbsp;&nbsp;&nbsp;",
+        md: `Multiple&nbsp;&nbsp;&nbsp;adjacent&nbsp;spaces here`,
+        expect: "canonical",
+        mustKeep: ["adjacent"],
+        note: "Zotero uses NBSP runs for alignment. They must resolve exactly once, not re-encode on every pass.",
+    },
+    {
+        id: "adv-unicode",
+        name: "RTL, ZWJ emoji, combining marks",
+        syntax: "‏ 👨‍👩‍👧 é",
+        md: `Arabic العربية and Hebrew עברית, family 👨‍👩‍👧‍👦, combining é, surrogate 𝔘𝔫𝔦.`,
+        expect: "verbatim",
+        mustKeep: ["العربية", "עברית", "👨‍👩‍👧‍👦", "𝔘𝔫𝔦"],
+        note: "ZWJ emoji sequences and astral-plane characters are multi-code-unit; a scanner indexing by code unit must not split them.",
+    },
+    {
+        id: "adv-unicode-in-wikilink",
+        name: "Non-Latin wikilink target",
+        syntax: "[[中文笔记]]",
+        md: `See [[中文笔记]] and [[العربية]] and [[emoji 🚀 note]].`,
+        expect: "verbatim",
+        mustKeep: ["[[中文笔记]]", "[[العربية]]", "[[emoji 🚀 note]]"],
+    },
+    {
+        id: "adv-long-line",
+        name: "Very long single line",
+        syntax: "(4000 chars)",
+        md: `${"word ".repeat(800)}[[Alpha]]`,
+        expect: "verbatim",
+        mustKeep: ["[[Alpha]]"],
+        note: "Guards against quadratic behaviour in the per-text-node scan.",
+    },
+    {
+        id: "adv-many-wikilinks",
+        name: "Many wikilinks in one node",
+        syntax: "200 × [[…]]",
+        md: Array.from({ length: 200 }, (_, i) => `[[N${i}]]`).join(" "),
+        expect: "verbatim",
+        mustKeep: ["[[N0]]", "[[N199]]"],
+        note: "The scan splices a text node per match; 200 splices in one node exercises the index bookkeeping after each SKIP.",
+    },
+    {
+        id: "adv-unterminated-forms",
+        name: "Unterminated Obsidian forms",
+        syntax: "[[ , ![[ , ^[",
+        md: `Unclosed [[Alpha and ![[Beta and ^[Gamma and [^Delta`,
+        expect: "canonical",
+        mustKeep: ["Alpha", "Beta", "Gamma", "Delta"],
+        note: "None of these terminate, so the scanner must claim nothing and let the escape pass do its job. The risk is a scan that runs to end-of-string and swallows the rest of the paragraph.",
+    },
+    {
+        id: "adv-adjacent-forms",
+        name: "Forms with no separator",
+        syntax: "[[A]]![[B]]#c^[d]",
+        md: `[[Alpha]]![[Beta.png]]#gamma^[delta]`,
+        expect: "verbatim",
+        mustKeep: ["[[Alpha]]", "![[Beta.png]]", "^[delta]"],
+        note: "Four claims back to back with no text between them, so every splice boundary is exercised at once.",
+    },
+    {
+        id: "adv-empty-forms",
+        name: "Empty forms",
+        syntax: "[[]] ![[]] ^[]",
+        md: `Empty [[]] and ![[]] and ^[] and [^].`,
+        expect: "verbatim",
+        note: "Zero-length bodies. Must not produce an empty raw node that the serializer then joins wrongly.",
+    },
+    {
+        id: "adv-pipe-heavy-table",
+        name: "Pipes everywhere in a table",
+        syntax: "| a\\|b | [[c\\|d]] |",
+        md: `| A | B |
+| --- | --- |
+| a \\| b | [[Note\\|alias]] |
+| \`code \\| pipe\` | **bo \\| ld** |`,
+        expect: "canonical",
+        mustKeep: ["[[Note\\|alias]]"],
+        note: "Escaped pipes in plain text, inside a wikilink, inside code and inside emphasis — four different escaping paths in one row.",
+    },
+    {
+        id: "adv-html-in-md",
+        name: "Raw HTML mixed with Obsidian syntax",
+        syntax: "<div>[[A]]</div>",
+        md: `<div class="x">[[Alpha]] and #beta</div>
+
+Normal [[Gamma]] here.`,
+        expect: "canonical",
+        mustKeep: ["[[Gamma]]"],
+        note: "Content inside a raw HTML block is an `html` literal on the mdast, not a text node, so the scanner never sees it. Recorded so the asymmetry is deliberate rather than surprising.",
+    },
+    {
+        id: "adv-dollar-heavy",
+        name: "Dollar signs that are not math",
+        syntax: "$5 $10 $$ $",
+        md: `Costs $5, then $10, then $$20 and a lone $ here.`,
+        expect: "canonical",
+        mustKeep: ["$5", "$10"],
+        note: "remark-math has to decide what is a delimiter. Whatever it decides must be stable across passes.",
+    },
+    {
+        id: "adv-repeated-entities",
+        name: "Ampersands and entities",
+        syntax: "& &amp; &#38;",
+        md: `Raw & and named &amp; and numeric &#38; and &notanentity;`,
+        expect: "canonical",
+        note: "The classic drift shape: an entity that re-encodes a little more on every pass.",
+    },
+]);
+
+/* ================================================================ */
+/*  16. Verbatim handlers in hostile containers                     */
+/* ================================================================ */
+
+/*
+ * `obsidianRaw` used to emit its value with no escaping at all, which
+ * destroyed content twice inside a table cell — once via an unescaped `|`,
+ * once via an unescaped newline. It now goes through `state.safe()` with only
+ * the content rules dropped.
+ *
+ * Three other stringify handlers still emit inline content verbatim:
+ *
+ *     zoteroOpaqueHtml      -> node.value
+ *     zoteroAnnotationImage -> node.value  /  ![node.value | w](path)
+ *     inlineMath            -> `$${node.value}$`
+ *
+ * All three produce *phrasing* content, so all three can land in a table cell.
+ * These cases exist to find out whether they share the same failure, rather
+ * than waiting for a note to find out first. (`code` and block `math` are
+ * block-level and cannot occur in a GFM cell; `link` delegates to the default
+ * handler and `marks` uses `state.containerPhrasing`, so both are already
+ * safe.)
+ */
+group("Verbatim handlers in cells", [
+    {
+        id: "vh-math-pipe-cell",
+        name: "Inline math containing a pipe, in a cell",
+        syntax: "| $a\\|b$ |",
+        md: `| A | B |
+| --- | --- |
+| $a \\| b$ | second |`,
+        expect: "canonical",
+        mustKeep: ["second"],
+        note: "Round-trips, and the reason is worth recording: remark-math keeps the `\\|` inside the value rather than unescaping it, so the escape written here is simply part of the formula and stays consistent. A bare `|` cannot be written from markdown at all — it would end the cell — which is why the destructive shape only reaches the pipeline from Zotero (see vh-math-pipe-cell-html).",
+    },
+    {
+        id: "vh-math-norm-cell",
+        name: "LaTeX norm symbol in a cell",
+        syntax: "| $\\|x\\|$ |",
+        md: `| A | B |
+| --- | --- |
+| $\\|x\\|$ | second |`,
+        expect: "canonical",
+        mustKeep: ["second"],
+        note: "`\\|` is the LaTeX norm symbol, which is why the inbound direction cannot simply normalize `\\|` to `|` — doing so would silently rewrite the formula. The pipe here is part of the maths, not a separator.",
+    },
+    {
+        id: "vh-math-latex-cell",
+        name: "LaTeX commands in a cell",
+        syntax: "| $\\frac{a}{b}$ |",
+        md: `| A | B |
+| --- | --- |
+| $\\frac{a}{b}$ | second |`,
+        expect: "canonical",
+        mustKeep: ["\\frac{a}{b}", "second"],
+        note: "Guards the other failure mode of escaping maths: backslashes are LaTeX, and any pass that escapes them accumulates.",
+    },
+    {
+        id: "vh-math-pipe-prose",
+        name: "Inline math with a pipe, in prose",
+        syntax: "$|x|$ (no table)",
+        md: `The set $\\{x : |x| < 1\\}$ is open.`,
+        expect: "verbatim",
+        mustKeep: ["|x|"],
+        note: "Control: outside a cell a `|` in maths is ordinary, so the plain `$…$` form must be kept rather than the HTML detour.",
+    },
+    {
+        id: "vh-math-pipe-cell-html",
+        name: "Zotero math with a pipe, in a cell",
+        syntax: '<td><span class="math">$a|b$',
+        html: `<table><tr><td><span class="math">$a|b$</span></td><td>second</td></tr></table>`,
+        expect: "broken",
+        gap: "bug",
+        mustKeep: ["second"],
+        note: "The one shape that still loses content: a bare `|` inside inline math inside a cell, which only Zotero can produce (markdown cannot express it — the pipe would end the cell). The row is torn and the following cell is dropped. Three candidate fixes were tried and each traded this for a different corruption; the analysis is in features/math.ts.",
+    },
+    {
+        id: "vh-citation-pipe-cell",
+        name: "Citation span with a pipe, in a cell",
+        syntax: "<td><span class=citation>a|b",
+        html: `<table><tr><td><span class="citation" data-citation="${CITATION}">(Doe | 2020)</span></td><td>second</td></tr></table>`,
+        expect: "canonical",
+        mustKeep: [`data-citation="${CITATION}"`, "second"],
+        note: "`zoteroOpaqueHtml` emits `node.value` verbatim — correct everywhere except a cell, where the `|` in the citation's visible text is a column separator.",
+    },
+    {
+        id: "vh-highlight-br-cell",
+        name: "Annotation span with a <br>, in a cell",
+        syntax: "<td><span class=highlight>a<br>b",
+        html: `<table><tr><td><span class="highlight" data-annotation="${ANNOTATION}">line one<br>line two</span></td><td>second</td></tr></table>`,
+        expect: "canonical",
+        mustKeep: [`data-annotation="${ANNOTATION}"`, "second"],
+        note: "The other half of the pair: gfm-table declares `\\n` unsafe in a cell too, and a `<br>` inside a preserved payload puts one there.",
+    },
+    {
+        id: "vh-colored-pipe-cell",
+        name: "Colour span with a pipe, in a cell",
+        syntax: '<td><span style="color">a|b',
+        html: `<table><tr><td><span style="color: #ff6666">red | text</span></td><td>second</td></tr></table>`,
+        expect: "canonical",
+        mustKeep: ["color: #ff6666", "second"],
+    },
+    {
+        id: "vh-annotation-image-cell",
+        name: "Annotation image in a cell",
+        syntax: "<td><img data-annotation>",
+        html: `<table><tr><td><img data-attachment-key="IMGKEY01" data-annotation="${ANNOTATION}" width="576"></td><td>second</td></tr></table>`,
+        expect: "canonical",
+        mustKeep: ['data-attachment-key="IMGKEY01"', "second"],
+        note: "`zoteroAnnotationImage` emits the raw `<img …>` tag. Its attribute values are URL-encoded, but the tag itself is long and unescaped.",
+    },
+    {
+        id: "vh-payload-in-list",
+        name: "Payload span in a list item",
+        syntax: "<li><span class=citation>",
+        html: `<ul><li><span class="citation" data-citation="${CITATION}">(Doe | 2020)</span></li></ul>`,
+        expect: "canonical",
+        mustKeep: [`data-citation="${CITATION}"`],
+        note: "Control for the cell cases: a list item has no column separator, so the same payload should be fine here. A failure here would mean something else entirely.",
+    },
+    {
+        id: "vh-payload-in-list-nopipe",
+        name: "Payload span in a list item, no pipe",
+        syntax: "<li><span class=citation> (plain)",
+        html: `<ul><li><span class="citation" data-citation="${CITATION}">(Doe, 2020)</span></li></ul>`,
+        expect: "canonical",
+        mustKeep: [`data-citation="${CITATION}"`],
+        note: "Isolates span accumulation from pipe splitting. No `|` anywhere, no table — if this still drifts, the cause is the `<li>`/`<td>` span wrapping meeting raw HTML, not the escaping.",
+    },
+    {
+        id: "vh-payload-in-paragraph",
+        name: "Payload span in a plain paragraph",
+        syntax: "<p><span class=citation>",
+        html: `<p><span class="citation" data-citation="${CITATION}">(Doe, 2020)</span></p>`,
+        expect: "verbatim",
+        mustKeep: [`data-citation="${CITATION}"`],
+        note: "The true control: a paragraph is not in `SPAN_WRAPPED_PARENTS`, so no wrapping happens and the payload should be untouched.",
+    },
+    {
+        id: "vh-nested-payload-spans",
+        name: "Payload span inside a mark",
+        syntax: "<u><span class=citation>",
+        html: `<p><u>see <span class="citation" data-citation="${CITATION}">(Doe, 2020)</span></u></p>`,
+        expect: "verbatim",
+        mustKeep: [`data-citation="${CITATION}"`, "<u>"],
+        note: "`marks` serializes through `state.containerPhrasing`, so the opaque child is emitted from inside another handler's context.",
+    },
+    {
+        id: "vh-math-in-heading",
+        name: "Inline math in a heading",
+        syntax: "## $x$",
+        md: `## Formula $x^2$ here`,
+        expect: "verbatim",
+        mustKeep: ["$x^2$"],
+    },
+]);
+
+/* ================================================================ */
 /*  Runner                                                          */
 /* ================================================================ */
 
@@ -1343,30 +2127,53 @@ function norm(s: string): string {
 
 interface Result {
     verdict: Verdict;
+    /** Source after one full round trip, in the source's own format. */
     rt: string;
+    /** After a second round trip. Equal to `rt` unless the case drifts. */
     rt2: string;
-    html: string;
+    /** The other format, in between — dumped by --verbose. */
+    intermediate: string;
+    /** A third round trip, to tell one-time canonicalization from slow drift. */
+    rt3: string;
     missing: string[];
     forbidden: string[];
 }
 
 async function runCase(c: Case, strictLineBreaks: boolean): Promise<Result> {
     const opts = { strictLineBreaks };
-    const html = await convert.md2html(c.md, opts);
-    const rt = await convert.html2md(html, opts);
-    const html2 = await convert.md2html(rt, opts);
-    const rt2 = await convert.html2md(html2, opts);
+    const { text, from } = sourceOf(c);
+
+    // One round trip, in whichever direction the case declares. `there` and
+    // `back` are the two halves; composing them keeps the rest of the runner
+    // identical for both directions.
+    const there = async (s: string) =>
+        from === "md"
+            ? await convert.md2html(s, opts)
+            : await convert.html2md(s, opts);
+    const back = async (s: string) =>
+        from === "md"
+            ? await convert.html2md(s, opts)
+            : await convert.md2html(s, opts);
+
+    const intermediate = await there(text);
+    const rt = await back(intermediate);
+    const rt2 = await back(await there(rt));
+    // A third pass separates "canonicalizes once, then settles" from a slow
+    // drift that a two-pass check would call stable by luck.
+    const rt3 = await back(await there(rt2));
 
     const missing = (c.mustKeep ?? []).filter((n) => !rt.includes(n));
     const forbidden = (c.mustNotHave ?? []).filter((n) => rt.includes(n));
 
     let verdict: Verdict;
-    if (norm(rt) !== norm(rt2)) verdict = "DRIFT";
-    else if (norm(rt) === norm(c.md) && forbidden.length === 0) verdict = "VERBATIM";
-    else if (missing.length === 0 && forbidden.length === 0) verdict = "CANONICAL";
+    if (norm(rt) !== norm(rt2) || norm(rt2) !== norm(rt3)) verdict = "DRIFT";
+    else if (norm(rt) === norm(text) && forbidden.length === 0)
+        verdict = "VERBATIM";
+    else if (missing.length === 0 && forbidden.length === 0)
+        verdict = "CANONICAL";
     else verdict = "BROKEN";
 
-    return { verdict, rt, rt2, html, missing, forbidden };
+    return { verdict, rt, rt2, rt3, intermediate, missing, forbidden };
 }
 
 const RANK: Record<Verdict, number> = {
@@ -1464,10 +2271,12 @@ export async function run(argv?: string[]) {
     }
 
     for (const { c, perMode } of detail) {
-        console.log(`\n### ${c.name}  [${c.id}]   ${c.syntax}`);
+        const { text, from } = sourceOf(c);
+        const arrow = from === "md" ? "md → html → md" : "html → md → html";
+        console.log(`\n### ${c.name}  [${c.id}]   ${c.syntax}   (${arrow})`);
         if (c.note) console.log(indent(c.note, "    | "));
-        console.log("  --- input ---");
-        console.log(indent(c.md, "  | "));
+        console.log(`  --- input (${from}) ---`);
+        console.log(indent(text, "  | "));
 
         for (const { mode, res, outcome } of perMode) {
             console.log(`  --- ${mode} → ${res.verdict} (${outcome}) ---`);
@@ -1485,19 +2294,26 @@ export async function run(argv?: string[]) {
                 );
             }
             if (res.verdict === "DRIFT") {
-                console.log("    !! NOT A FIXED POINT — second pass differs:");
-                const a = res.rt.split("\n");
-                const b = res.rt2.split("\n");
+                const slow = norm(res.rt) === norm(res.rt2);
+                console.log(
+                    slow
+                        ? "    !! DRIFTS ON THE THIRD PASS — a two-pass check would call this stable:"
+                        : "    !! NOT A FIXED POINT — second pass differs:",
+                );
+                const a = (slow ? res.rt2 : res.rt).split("\n");
+                const b = (slow ? res.rt3 : res.rt2).split("\n");
                 for (let i = 0; i < Math.max(a.length, b.length); i++) {
                     if (a[i] !== b[i]) {
-                        console.log(`      L${i + 1} 1st: ${JSON.stringify(a[i] ?? "(missing)")}`);
-                        console.log(`      L${i + 1} 2nd: ${JSON.stringify(b[i] ?? "(missing)")}`);
+                        console.log(`      L${i + 1} before: ${JSON.stringify(a[i] ?? "(missing)")}`);
+                        console.log(`      L${i + 1} after : ${JSON.stringify(b[i] ?? "(missing)")}`);
                     }
                 }
             }
             if (verbose) {
-                console.log("    --- html ---");
-                console.log(indent(res.html, "    . "));
+                console.log(
+                    `    --- intermediate (${sourceOf(c).from === "md" ? "html" : "md"}) ---`,
+                );
+                console.log(indent(res.intermediate, "    . "));
             }
         }
     }

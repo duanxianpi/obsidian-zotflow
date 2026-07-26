@@ -98,16 +98,36 @@ export const listFeature: SyntaxFeature = {
      * Shape `<li>` / `<td>` contents the way Zotero's note editor does:
      * each text run wrapped in a `<span>`, and no whitespace-only text nodes
      * between them. Keeps sync diffs against Zotero-authored notes minimal.
+     *
+     * Text *inside* raw HTML is skipped, and that exclusion is load-bearing.
+     * remark does not keep inline HTML as one node: `<span …>text</span>`
+     * arrives as three siblings — a `raw` open tag, a `text` node, a `raw`
+     * close tag — so the text in the middle is indistinguishable from a bare
+     * run by type alone. Wrapping it put a `<span>` *inside* the preserved
+     * element; the next inbound pass captured that element verbatim, baking
+     * the addition into the payload, and the pass after that added another.
+     * A citation in a Zotero-authored list grew one nesting level per sync,
+     * without bound.
      */
     transformHast(tree: HRoot) {
         visit(tree, "element", (parent: Element) => {
             if (!SPAN_WRAPPED_PARENTS.has(parent.tagName)) return;
 
             const shaped: ElementContent[] = [];
+            let rawDepth = 0;
+
             for (const child of parent.children) {
+                if (child.type === "raw") {
+                    rawDepth += rawNesting(child.value);
+                    shaped.push(child);
+                    continue;
+                }
                 if (child.type !== "text") {
-                    // `raw` nodes (from remark-rehype's dangerous HTML
-                    // passthrough) and elements are kept as-is.
+                    shaped.push(child);
+                    continue;
+                }
+                if (rawDepth > 0) {
+                    // Content of a raw element — not ours to reshape.
                     shaped.push(child);
                     continue;
                 }
@@ -125,6 +145,32 @@ export const listFeature: SyntaxFeature = {
         });
     },
 };
+
+/** HTML elements that never have content, so they open no nesting level. */
+const VOID_TAGS = new Set([
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+]);
+
+/**
+ * How many element levels a raw HTML fragment leaves open (negative when it
+ * closes more than it opens).
+ *
+ * Tag-counting rather than parsing, which is enough here: these fragments come
+ * from remark's inline-HTML nodes, which hold one tag each. A fragment that is
+ * malformed or too clever simply yields a depth that never returns to zero,
+ * and the only consequence is that some text goes unwrapped — cosmetic, and
+ * far cheaper than the unbounded nesting the naive version produced.
+ */
+function rawNesting(value: string): number {
+    let depth = 0;
+    for (const match of value.matchAll(/<(\/?)([a-zA-Z][^\s/>]*)([^>]*)>/g)) {
+        const name = (match[2] ?? "").toLowerCase();
+        if (VOID_TAGS.has(name) || (match[3] ?? "").endsWith("/")) continue;
+        depth += match[1] === "/" ? -1 : 1;
+    }
+    return depth;
+}
 
 /** An empty `<p>` — Zotero emits these, markdown has no place for them. */
 export function isEmptyParagraph(node: RootContent): boolean {

@@ -244,8 +244,9 @@ syntax passes, it cannot collide with document content.
 
 ## 8. The escaping policy
 
-This is the subtlest part of the module and has been the source of three
-content-destroying bugs. Read this before touching `obsidianRaw`.
+This is the subtlest part of the module and has been the source of five
+content-destroying bugs. Read it before writing any handler that emits a
+payload verbatim.
 
 `mdast-util-to-markdown` escapes text so it cannot be re-read as markdown.
 `state.unsafe` is **not one global list**: each entry names the construct it
@@ -285,9 +286,56 @@ case. `[`, `!` and `#` are what the forms are made of, but escaping `&`, `_` or
 has one — `phrasing` is the generic "this is inline text" scope, so a rule
 naming only it is a content rule by construction.
 
-`zoteroOpaqueHtml` still emits verbatim, and correctly so: its value is a
-complete serialised HTML element, re-parsed as HTML on the way back in, and
-Zotero's payloads must survive byte-for-byte.
+`isContainerScoped` and `safeInContainer` live in `features/types.ts` because
+three other handlers emit verbatim phrasing content and therefore share the
+problem — a payload span, an annotation image and inline math can all land in a
+table cell:
+
+| Handler | Payload |
+| --- | --- |
+| `obsidianRaw` | Obsidian syntax |
+| `zoteroOpaqueHtml` | a serialised Zotero element |
+| `zoteroAnnotationImage` | an `<img>` tag plus a literal `\|` width separator |
+| `inlineMath` | LaTeX — **the exception, see below** |
+
+The first three use `safeInContainer`. Markdown's escaping is reversible for
+them: the GFM table parser turns `\|` back into `|` before the inline HTML is
+read, so the payload arrives intact.
+
+**Inline math is the exception and is deliberately left unescaped**, even
+though `$a|b$` in a cell tears the row apart. The two tokenizers disagree:
+
+```
+| `a \| b` |  ->  inlineCode value "a | b"    (unescaped)
+| $a \| b$ |  ->  inlineMath value "a \| b"   (backslash kept)
+```
+
+remark-math takes `$…$` verbatim, so an escape written into a cell is never
+removed and one more backslash appears on every pass. Normalising `\|` back to
+`|` on the way in is not available either — `\|` is the LaTeX norm symbol.
+Emitting Zotero's `<span class="math">$…$</span>` form instead fails a third
+way: the `$…$` inside the raw span is re-parsed as math and wrapped in a second
+`<span class="math">`, doubling on every pass. The full analysis is in
+`features/math.ts`; the gap is recorded in §12.
+
+### The other shape: transforms that meet raw HTML
+
+`list.ts` shapes `<li>` / `<td>` contents the way Zotero's editor does, wrapping
+each text run in a `<span>`. remark does not keep inline HTML as one node —
+`<span …>text</span>` arrives as a `raw` open tag, a `text` node and a `raw`
+close tag — so the text in the middle is indistinguishable from a bare run by
+type alone.
+
+Wrapping it put a `<span>` *inside* the preserved element. The next inbound
+pass captured that element verbatim, baking the addition into the payload, and
+the pass after that added another: a citation in a Zotero-authored list grew
+one nesting level per sync, without bound. `rawNesting` now tracks how many
+element levels each raw fragment leaves open, and text at depth > 0 is left
+alone.
+
+The general lesson is the same as the escaping one. **A transform that assumes
+it is looking at bare content will be wrong wherever an opaque payload is
+spliced in**, and the failure is silent until something accumulates.
 
 ---
 
@@ -372,7 +420,7 @@ without one, a module cleaned to zero drifts back. To back it out, drop
 | Command | What it asks |
 | --- | --- |
 | `npm run test:convert` | `test-html-roundtrip.mjs` (66 checks) and `test-md-roundtrip.mjs` (116) — "does feature X behave as designed?" |
-| `npm run test:obsidian-syntax` | 113 cases × 2 line-break modes — "what happens to syntax nobody considered?" |
+| `npm run test:obsidian-syntax` | 183 cases × 2 line-break modes, in both directions — "what happens to syntax nobody considered?" |
 | `npm run lint:convert` | zero eslint problems in this module |
 
 All three run in `npm test`.
@@ -383,6 +431,20 @@ All three run in `npm test`.
 syntax Obsidian documents is fed in as an isolated snippet and classified by
 what came out. A blank spot there is the point of the test, not an omission
 from it.
+
+A case declares its source format, and that picks the direction:
+
+```
+md    Obsidian authored it.   md → html → md → html → md
+html  Zotero authored it.     html → md → html → md → html
+```
+
+Both matter and they are not mirror images. Only the second sees real citation
+payloads, annotation spans, styled tables and the wrapper div — and it is where
+the span-accumulation and payload-in-a-cell bugs were found. Three round trips
+are run rather than two, so a case that canonicalises once and then settles is
+distinguished from one that drifts slowly enough for a two-pass check to call
+it stable.
 
 Verdicts, worst to best:
 
@@ -443,6 +505,7 @@ language too.
 | Gap | Detail |
 | --- | --- |
 | `[[x*y*z]]` | `md2html` parses `*y*` as emphasis, so the wikilink returns as three siblings — text, `emphasis`, text — and a scan working inside one text node at a time can never reassemble it. Only a real micromark construct for `[[…]]`, out-ranking emphasis at tokenization, addresses this class. Underscores are safe by contrast (`[[a_b_c]]`), because CommonMark does not allow intraword `_` emphasis |
+| `$a\|b$` in a table cell | A bare `\|` inside inline math inside a cell tears the row apart and drops the following cell. Reachable only from Zotero — markdown cannot express it, since the pipe would end the cell. Three candidate fixes each trade it for a different corruption; see §8 and `features/math.ts` |
 
 **Behaviour changes** already shipped, listed so a one-time sync diff is not
 mistaken for a bug:

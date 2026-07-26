@@ -16,7 +16,7 @@
 import { toHtml } from "hast-util-to-html";
 import { visit } from "unist-util-visit";
 
-import { PASS, stringifyAs } from "./types";
+import { PASS, safeInContainer, stringifyAs } from "./types";
 
 import type { Root as MRoot } from "mdast";
 import type { ZoteroAnnotationImage } from "../model/nodes";
@@ -56,11 +56,23 @@ export const annotationImageFeature: SyntaxFeature = {
     }),
 
     stringifyHandlers: () => ({
-        zoteroAnnotationImage: stringifyAs<ZoteroAnnotationImage>((node) => {
-            if (!node.displayPath) return node.value;
-            const widthSuffix = node.width ? ` | ${node.width}` : "";
-            return `![${node.value}${widthSuffix}](${node.displayPath})`;
-        }),
+        /**
+         * The `| width` separator is deliberately a literal `|`, and the
+         * carried `<img>` tag is raw HTML — both are fine in prose and both
+         * are column separators inside a table cell, so the emitted form goes
+         * through `safeInContainer`. The GFM table parser unescapes `\|`
+         * before the alt text is read, so `ANNOTATED_IMAGE_ALT_RE` still sees
+         * the literal `|` it expects.
+         */
+        zoteroAnnotationImage: stringifyAs<ZoteroAnnotationImage>(
+            (node, _parent, state, info) => {
+                const widthSuffix = node.width ? ` | ${node.width}` : "";
+                const out = node.displayPath
+                    ? `![${node.value}${widthSuffix}](${node.displayPath})`
+                    : node.value;
+                return safeInContainer(state, info, out);
+            },
+        ),
     }),
 
     /**
