@@ -511,11 +511,43 @@ group("Footnotes", [
         syntax: "^[a\\nb]",
         md: `The claim is never quite stated.^[They say it in §4, but
 framed as complexity rather than as an argument.] Worth checking.`,
-        expect: "broken",
-        gap: "bug",
+        expect: "verbatim",
         mustKeep: ["^[They say it in §4, but"],
         mustNotHave: ["^\\["],
-        note: "`scanInlineFootnote` stops at a newline, as the bracket forms all do, so a footnote wrapped across two source lines is not claimed and its `[` is escaped. Obsidian is happy with the wrapped form — it is ordinary inline content — so this is a real gap. Allowing newlines needs care: an unterminated `^[` would then run to the end of the paragraph. Found by a hand-written note, not by this file, which is the argument for keeping one of those around.",
+        note: "An inline footnote is inline content, so it wraps with the prose around it. `scanInlineFootnote` used to stop at a newline like the bracket forms do, leaving this unclaimed and escaped to `^\\[…]` — invisible to whoever wrote it, since nothing about the note said the wrapping mattered. Found by a hand-written note, not by this file, which is the argument for keeping one of those around.",
+    },
+    {
+        id: "footnote-inline-unterminated-multiline",
+        name: "Unterminated ^[ across lines",
+        syntax: "^[ with no close",
+        md: `Start of a paragraph with ^[an opener that never closes
+and a second line
+and a third, all inside the same paragraph.`,
+        expect: "canonical",
+        mustKeep: ["and a third, all inside the same paragraph."],
+        note: "The risk that came with allowing newlines: a stray `^[` must not swallow the rest of the paragraph. It cannot — the scan is bounded by the text node and returns -1 having found no `]` — and this case is what says so.",
+    },
+    {
+        id: "footnote-inline-wrapped-wikilink",
+        name: "Wrapped footnote containing a wikilink",
+        syntax: "^[a\\n[[B]] c]",
+        md: `Claimed in passing.^[See [[Sequence models]] and
+also [[RNN notes]] for the comparison.] Back to prose.`,
+        expect: "verbatim",
+        mustKeep: ["[[Sequence models]]", "[[RNN notes]]"],
+        mustNotHave: ["^\\[", "\\[["],
+        note: "Both special rules at once: a nested `[[…]]` inside the footnote, and a line break between them.",
+    },
+    {
+        id: "footnote-inline-wrapped-in-cell",
+        name: "Wrapped footnote in a table cell",
+        syntax: "| ^[a\\nb] |",
+        md: `| Claim | Note |
+| --- | --- |
+| First | qualified^[because of<br>the assumption] |`,
+        expect: "canonical",
+        mustKeep: ["Claim", "First"],
+        note: "A newline inside a claimed span meeting the one construct where a newline is a structural break. `safeInContainer` is what keeps the row intact.",
     },
     {
         id: "footnote-multiblock",

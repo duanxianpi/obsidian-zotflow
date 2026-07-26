@@ -77,15 +77,29 @@ function scanFlat(value: string, from: number, close: string): number {
 }
 
 /**
- * Scan the body of `^[…]`. Unlike the others this one routinely holds a
- * wikilink — `^[see [[Note]]]` — so a nested `[[…]]` is stepped over rather
- * than rejected. Any other `[` still ends the attempt: a lone bracket means
- * this was not an inline footnote.
+ * Scan the body of `^[…]`.
+ *
+ * Two things set this form apart from the bracket forms above, and both come
+ * from Obsidian's own grammar rather than from convenience.
+ *
+ * It routinely holds a wikilink — `^[see [[Note]]]` — so a nested `[[…]]` is
+ * stepped over rather than rejected. Any *other* `[` still ends the attempt: a
+ * lone bracket means this was not an inline footnote.
+ *
+ * And it may span lines. An inline footnote is inline *content*, so it wraps
+ * with the prose around it; a wikilink or footnote-reference target may not
+ * contain a newline at all, which is why `scanFlat` still rejects one. A
+ * footnote that happened to fall across a line break was previously left
+ * unclaimed and came back as `^\[…]` — invisible to whoever wrote it, since
+ * nothing about the note said the wrapping mattered.
+ *
+ * Allowing newlines does not let a stray `^[` run away: the scan is bounded by
+ * the text node, which mdast has already confined to a single paragraph, and
+ * an unterminated `^[` still returns -1 having found no `]`.
  */
 function scanInlineFootnote(value: string, from: number): number {
     for (let i = from; i < value.length; i++) {
         const ch = value[i];
-        if (ch === "\n") return -1;
         if (ch === "]") return i + 1;
         if (ch === "[") {
             if (!value.startsWith("[[", i)) return -1;
