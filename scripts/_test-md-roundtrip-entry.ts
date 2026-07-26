@@ -13,6 +13,15 @@ import { ConvertService } from "worker/services/convert";
 
 const convert = new ConvertService();
 
+/**
+ * `strictLineBreaks` mirrors ONE vault setting, so both directions must be
+ * given the same value. Passing `true` to md2html while letting html2md
+ * default to `false` models a configuration that cannot occur in production
+ * — item-note.ts sources both from `vaultConfig.strictLineBreaks` — and makes
+ * `<br>` round-tripping look broken when it is not.
+ */
+const CONVERT_OPTS = { strictLineBreaks: true };
+
 /* ================================================================ */
 /*  Test Point Types                                                */
 /* ================================================================ */
@@ -362,12 +371,12 @@ cd ~/Desktop
             {
                 type: "html-contains",
                 label: "Checked marker as text",
-                needle: "<li>[x] ",
+                needle: "<li><span>[x] ",
             },
             {
                 type: "html-contains",
                 label: "Unchecked marker as text",
-                needle: "<li>[ ] ",
+                needle: "<li><span>[ ] ",
             },
             {
                 type: "html-not-contains",
@@ -726,12 +735,12 @@ export async function run(filter?: string[]) {
         banner(`TEST: ${tp.name}`);
 
         // ── md → html ──
-        const html = await convert.md2html(tp.md, { strictLineBreaks: true });
+        const html = await convert.md2html(tp.md, CONVERT_OPTS);
         console.log("--- HTML ---");
         console.log(html);
 
         // ── html → md (round-trip) ──
-        const rt = await convert.html2md(html);
+        const rt = await convert.html2md(html, CONVERT_OPTS);
         console.log("--- MD (round-tripped) ---");
         console.log(rt);
 
@@ -763,18 +772,25 @@ export async function run(filter?: string[]) {
             else totalFail++;
         }
 
-        // ── double round-trip: md → html → md → html ──
-        const html2 = await convert.md2html(rt, { strictLineBreaks: true });
-        const stable = html === html2;
-        console.log(
-            `  [${stable ? "PASS" : "FAIL"}] Double round-trip HTML stable`,
-        );
+        // ── idempotency: html2md(md2html(·)) must be a fixed point ──
+        //
+        // Asserts `g(f(g(f(x)))) === g(f(x))`, not `f(g(f(x))) === f(x)`.
+        // The round trip is allowed to canonicalize once — bullet markers
+        // become `*`, `&nbsp;` becomes U+00A0, soft breaks around a literal
+        // `<br>` collapse — because a test input need not already be in
+        // canonical form. What must never happen is *drift*: an escape that
+        // grows a backslash each pass, an entity that re-encodes, a `<span>`
+        // that accumulates. Demanding equality on the first pass conflates
+        // the two and fails on inputs that were simply written by hand.
+        const html2 = await convert.md2html(rt, CONVERT_OPTS);
+        const rt2 = await convert.html2md(html2, CONVERT_OPTS);
+        const stable = rt === rt2;
+        console.log(`  [${stable ? "PASS" : "FAIL"}] Round-trip idempotent`);
         if (stable) totalPass++;
         else {
             totalFail++;
-            // Show MD diff for easier debugging
-            const lines1 = tp.md.split("\n");
-            const lines2 = rt.split("\n");
+            const lines1 = rt.split("\n");
+            const lines2 = rt2.split("\n");
             const maxLen = Math.max(lines1.length, lines2.length);
             let shown = 0;
             for (let i = 0; i < maxLen && shown < 10; i++) {
@@ -782,10 +798,10 @@ export async function run(filter?: string[]) {
                     shown++;
                     console.log(`    Line ${i + 1}:`);
                     console.log(
-                        `      orig: ${JSON.stringify(lines1[i] ?? "(missing)")}`,
+                        `      1st: ${JSON.stringify(lines1[i] ?? "(missing)")}`,
                     );
                     console.log(
-                        `      rt:   ${JSON.stringify(lines2[i] ?? "(missing)")}`,
+                        `      2nd: ${JSON.stringify(lines2[i] ?? "(missing)")}`,
                     );
                 }
             }

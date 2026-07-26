@@ -1,6 +1,7 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
+import { matchLeadingNoteMeta, stripLeadingNoteMeta } from "utils/note-meta";
 import {
     createEmbeddableMarkdownEditor,
     type EmbeddableMarkdownEditor,
@@ -11,12 +12,6 @@ import type { NoteData } from "types/zotero-item";
 import type { IDBZoteroItem } from "types/db-schema";
 
 export const NOTE_EDITOR_VIEW_TYPE = "zotflow-note-editor-view";
-
-/**
- * Regex matching the `<!-- ZF_NOTE_META ... -->` comment
- * that `html2md` prepends for round-trip fidelity.
- */
-const META_RE = /^(?:<!-- ZF_NOTE_META (.*?) -->)\n?/;
 
 const SAVE_DEBOUNCE_MS = 2000;
 
@@ -113,11 +108,11 @@ export class NoteEditorView extends ItemView {
                 );
 
                 // Strip and store the metadata comment so the user cannot edit it
-                const metaMatch = markdown.match(META_RE);
+                const metaMatch = matchLeadingNoteMeta(markdown);
                 if (metaMatch) {
-                    this.metaLine = metaMatch[0]!;
+                    this.metaLine = metaMatch.raw;
                 }
-                editableContent = markdown.replace(META_RE, "");
+                editableContent = stripLeadingNoteMeta(markdown);
             }
 
             const wrapper = this.contentEl.createDiv({
