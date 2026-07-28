@@ -350,6 +350,30 @@ describe("item pull deletions", () => {
         ).toBe(true);
     });
 
+    test("a cyclic parentItem does not stall the deletion cascade", async () => {
+        // The descendant walk runs inside an open Dexie transaction, so an
+        // unguarded cycle would hang holding a write lock. No code path
+        // produces one today — nothing local ever edits parentItem — but the
+        // guard is what keeps that an invariant rather than a dependency.
+        h = await createSyncHarness();
+        const lib = h.server.library(USER_ID);
+        lib.addItem({ key: "ITEMAAAA" });
+        await h.sync.startSync();
+
+        await db.items.update([USER_ID, "ITEMAAAA"], { parentItem: "ITEMBBBB" });
+        await seedItem({
+            libraryID: USER_ID,
+            key: "ITEMBBBB",
+            parentItem: "ITEMAAAA",
+        });
+
+        lib.deleteItem("ITEMAAAA");
+        const result = await h.sync.startSync();
+
+        expect(result.failCount).toBe(0);
+        expect(await db.items.count()).toBe(0);
+    });
+
     test("a tombstone for an item we never had is ignored", async () => {
         h = await createSyncHarness();
         const lib = h.server.library(USER_ID);
@@ -528,6 +552,28 @@ describe("collection pull", () => {
         const root = await db.collections.get([USER_ID, "ROOTCOLL"]);
         expect(root!.syncStatus).toBe("conflict");
         expect(await db.collections.count()).toBe(2);
+    });
+
+    test("a cyclic parentCollection does not stall the deletion cascade", async () => {
+        h = await createSyncHarness();
+        const lib = h.server.library(USER_ID);
+        lib.addCollection({ key: "COLLAAAA" });
+        await h.sync.startSync();
+
+        await db.collections.update([USER_ID, "COLLAAAA"], {
+            parentCollection: "COLLBBBB",
+        });
+        await seedCollection({
+            libraryID: USER_ID,
+            key: "COLLBBBB",
+            parentCollection: "COLLAAAA",
+        });
+
+        lib.deleteCollection("COLLAAAA");
+        const result = await h.sync.startSync();
+
+        expect(result.failCount).toBe(0);
+        expect(await db.collections.count()).toBe(0);
     });
 
     test("a tombstone for a collection we never had is ignored", async () => {

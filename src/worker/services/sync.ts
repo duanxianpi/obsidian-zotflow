@@ -487,9 +487,15 @@ export class SyncService {
     private async getAllCollectionDescendants(
         libraryID: number,
         parentKey: string,
+        visited: Set<string> = new Set(),
     ): Promise<any[]> {
         // Guard: empty parentKey would match ALL top-level collections
         if (!parentKey) return [];
+
+        // Guard: a cyclic parentCollection would otherwise recurse forever,
+        // and it would do so inside the caller's open Dexie transaction.
+        if (visited.has(parentKey)) return [];
+        visited.add(parentKey);
 
         const children = await db.collections
             .where({
@@ -501,7 +507,7 @@ export class SyncService {
         if (children.length === 0) return [];
 
         const grandChildPromises = children.map((child) =>
-            this.getAllCollectionDescendants(libraryID, child.key),
+            this.getAllCollectionDescendants(libraryID, child.key, visited),
         );
         const grandChildrenArrays = await Promise.all(grandChildPromises);
 
@@ -807,9 +813,15 @@ export class SyncService {
     private async getAllDescendants(
         libraryID: number,
         parentKey: string,
+        visited: Set<string> = new Set(),
     ): Promise<any[]> {
         // Guard: empty parentKey would match ALL top-level items
         if (!parentKey) return [];
+
+        // Guard: a cyclic parentItem would otherwise recurse forever, and it
+        // would do so inside the caller's open Dexie transaction.
+        if (visited.has(parentKey)) return [];
+        visited.add(parentKey);
 
         const children = await db.items
             .where({ libraryID: libraryID, parentItem: parentKey })
@@ -818,7 +830,7 @@ export class SyncService {
         if (children.length === 0) return [];
 
         const grandChildPromises = children.map((child) =>
-            this.getAllDescendants(libraryID, child.key),
+            this.getAllDescendants(libraryID, child.key, visited),
         );
         const grandChildrenArrays = await Promise.all(grandChildPromises);
 

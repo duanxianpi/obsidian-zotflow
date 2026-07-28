@@ -812,22 +812,21 @@ describe("getItemPaths", () => {
     });
 
     /**
-     * A cycle in `parentCollection` hangs the worker.
+     * A cycle in `parentCollection` used to hang the worker outright.
      *
-     * The ancestry walk in getItemPaths has no visited set, and the path cache
-     * it would otherwise break on is only written *after* the walk completes.
-     * A -> B -> A therefore loops forever, synchronously, inside the worker
-     * thread: no error, no timeout, no recovery. Vitest cannot even abort it,
-     * because nothing yields to the event loop.
+     * The ancestry walk had no visited set, and the path cache it would
+     * otherwise break on is written only *after* the walk completes, so
+     * A -> B -> A looped forever — synchronously, so nothing yielded and
+     * neither an error, a timeout, nor vitest's own abort could land.
      *
-     * Reachable in production: `ConflictService.keepLocalCollection` marks a
-     * collection `updated` while preserving its LOCAL parentCollection, and
-     * the pull then flags it `conflict` and leaves that pointer alone — while
-     * a clean sibling takes the server's new parent. See sync.ts:347.
-     *
-     * Un-skip once a depth or visited guard exists.
+     * No code path can currently produce such a cycle: a collection is only
+     * ever written as `synced` (normalizeCollection hardcodes it, and every
+     * write that could dirty one already requires it to be dirty), so the
+     * local parentCollection never diverges from the server's. The guard is
+     * therefore insurance, not a bug fix — but it is the cheap half of the
+     * trade, and local collection editing would remove the invariant.
      */
-    test.skip("a cyclic parentCollection must not hang", async () => {
+    test("a cyclic parentCollection terminates instead of hanging", async () => {
         await seedCollection({
             libraryID: USER_ID,
             key: "COLLAAAA",
@@ -844,6 +843,23 @@ describe("getItemPaths", () => {
         const paths = await h.dbHelper.getItemPaths([
             { libraryID: USER_ID, key: "ARTICLE1", collections: ["COLLAAAA"] },
         ]);
-        expect(paths["1:ARTICLE1"]).toHaveLength(1);
+
+        // The walk stops the moment it revisits a key, so the breadcrumbs are
+        // whatever it collected before closing the loop — one lap, no repeats.
+        expect(paths["1:ARTICLE1"]).toEqual(["My Library/B/A/"]);
+    });
+
+    test("a self-parented collection terminates too", async () => {
+        await seedCollection({
+            libraryID: USER_ID,
+            key: "SELFCOLL",
+            name: "Self",
+            parentCollection: "SELFCOLL",
+        });
+
+        const paths = await h.dbHelper.getItemPaths([
+            { libraryID: USER_ID, key: "ARTICLE1", collections: ["SELFCOLL"] },
+        ]);
+        expect(paths["1:ARTICLE1"]).toEqual(["My Library/Self/"]);
     });
 });

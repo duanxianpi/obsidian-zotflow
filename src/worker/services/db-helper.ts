@@ -400,6 +400,11 @@ export class DbHelperService {
                     const breadcrumbs: string[] = [];
                     let currentKey: string | undefined = collKey;
                     let foundParentPath = "";
+                    // A cyclic parentCollection would otherwise loop forever,
+                    // and synchronously: nothing in here yields, so the worker
+                    // thread would never come back. The path cache cannot stand
+                    // in for this — it is only written after the walk finishes.
+                    const visitedSteps = new Set<string>();
 
                     while (currentKey) {
                         const stepCacheKey: string = `${libID}:${currentKey}`;
@@ -409,6 +414,9 @@ export class DbHelperService {
                             foundParentPath = collectionPathCache[stepCacheKey];
                             break;
                         }
+
+                        if (visitedSteps.has(stepCacheKey)) break;
+                        visitedSteps.add(stepCacheKey);
 
                         const coll: IDBZoteroCollection | null | undefined =
                             collectionEntityCache[stepCacheKey];
