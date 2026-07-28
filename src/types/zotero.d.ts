@@ -125,7 +125,7 @@ declare module "./zotero-item" {
         annotationIsExternal?: boolean;
         annotationAuthorName?: string;
         annotationType: string;
-        annotationText: string;
+        annotationText: string | null;
         annotationComment: string;
         annotationColor: string;
         annotationPageLabel: string;

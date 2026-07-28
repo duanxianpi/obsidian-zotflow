@@ -88,6 +88,6 @@
         "unist-util-visit": "^5.1.0",
         "unist-util-visit-parents": "^6.0.2",
         "uuid": "^13.0.0",
-        "zotero-api-client": "^0.47.0"
+        "zotero-api-client": "^0.50.0"
     }
 }
