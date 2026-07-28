@@ -1,23 +1,18 @@
 /**
- * HTML → MD → HTML round-trip test (Zotero note-editor content).
+ * HTML → MD → HTML round-trip (Zotero note-editor content).
  *
- * Each test point is an isolated HTML snippet. The wrapper div is shared
- * but each test point runs html2md → md2html independently.
+ * Each test point is an isolated HTML snippet. The wrapper div is shared but
+ * each point runs html2md → md2html independently, and every check inside a
+ * point becomes its own test case so a failure names the exact property lost.
  *
- * Usage:
- *   node scripts/test-convert.mjs                  # run all
- *   node scripts/test-convert.mjs headings math     # run only matching
+ * Migrated from scripts/_test-html-roundtrip-entry.ts.
  */
-// @ts-ignore
+import { describe, test, expect, beforeAll } from "vitest";
 import { ConvertService } from "worker/services/convert";
-// @ts-ignore
+
 import type { Html2MdOptions } from "worker/convert/html-to-md";
 
 const convert = new ConvertService();
-
-/* ================================================================ */
-/*  Shared wrapper (data-citation-items / data-schema-version)      */
-/* ================================================================ */
 
 const WRAPPER_OPEN = `<div data-citation-items="%5B%7B%22uris%22%3A%5B%22http%3A%2F%2Fzotero.org%2Fusers%2F4100175%2Fitems%2FU285LCSS%22%5D%2C%22itemData%22%3A%7B%22id%22%3A%22http%3A%2F%2Fzotero.org%2Fusers%2F4100175%2Fitems%2FU285LCSS%22%2C%22type%22%3A%22article-journal%22%2C%22title%22%3A%22Bitcoin%3A%20A%20Peer-to-Peer%20Electronic%20Cash%20System%22%2C%22author%22%3A%5B%7B%22family%22%3A%22Nakamoto%22%2C%22given%22%3A%22Satoshi%22%7D%5D%7D%7D%5D" data-schema-version="5">`;
 const WRAPPER_CLOSE = `</div>`;
@@ -44,10 +39,6 @@ function wrap(body: string): string {
     return `${WRAPPER_OPEN}\n${body}\n${WRAPPER_CLOSE}`;
 }
 
-/* ================================================================ */
-/*  Test Point Types                                                */
-/* ================================================================ */
-
 interface TestPoint {
     name: string;
     html: string;
@@ -62,11 +53,7 @@ type Check =
     | { type: "regex"; label: string; pattern: RegExp }
     | { type: "md-regex"; label: string; pattern: RegExp };
 
-/* ================================================================ */
-/*  Test Points                                                     */
-/* ================================================================ */
-
-const tests: TestPoint[] = [
+const testPoints: TestPoint[] = [
     {
         name: "link destinations with ampersands",
         html: `<p><a href="https://example.com/?a=1&amp;b=2">multi param</a> and <a href="obsidian://zotflow?type=open-note&amp;libraryID=1&amp;key=K">zotflow</a></p>`,
@@ -413,104 +400,43 @@ line 3</pre>`,
     },
 ];
 
-/* ================================================================ */
-/*  Test Runner                                                     */
-/* ================================================================ */
+for (const point of testPoints) {
+    describe(point.name, () => {
+        let md: string;
+        let htmlOut: string;
 
-function banner(label: string) {
-    console.log("\n" + "=".repeat(72));
-    console.log(` ${label}`);
-    console.log("=".repeat(72));
-}
+        beforeAll(async () => {
+            md = await convert.html2md(wrap(point.html), HTML2MD_OPTS);
+            htmlOut = await convert.md2html(md, MD2HTML_OPTS);
+        });
 
-export async function run(filter?: string[]) {
-    const active = filter?.length
-        ? tests.filter((t) =>
-              filter.some((f) =>
-                  t.name.toLowerCase().includes(f.toLowerCase()),
-              ),
-          )
-        : tests;
-
-    if (active.length === 0) {
-        console.log("[WARN] No test points matched the filter.");
-        return;
-    }
-
-    let totalPass = 0;
-    let totalFail = 0;
-
-    for (const tp of active) {
-        banner(`TEST: ${tp.name}`);
-        const input = wrap(tp.html);
-
-        // ── html → md ──
-        const md = await convert.html2md(input, HTML2MD_OPTS);
-        console.log("--- MD ---");
-        console.log(md);
-
-        // ── md → html ──
-        const htmlOut = await convert.md2html(md, MD2HTML_OPTS);
-        console.log("--- HTML (round-tripped) ---");
-        console.log(htmlOut);
-
-        // ── checks ──
-        for (const c of tp.checks) {
-            let pass = false;
-            switch (c.type) {
-                case "contains":
-                    pass = htmlOut.includes(c.needle);
-                    break;
-                case "not-contains":
-                    pass = !htmlOut.includes(c.needle);
-                    break;
-                case "md-contains":
-                    pass = md.includes(c.needle);
-                    break;
-                case "md-not-contains":
-                    pass = !md.includes(c.needle);
-                    break;
-                case "regex":
-                    pass = c.pattern.test(htmlOut);
-                    break;
-                case "md-regex":
-                    pass = c.pattern.test(md);
-                    break;
-            }
-            console.log(`  [${pass ? "PASS" : "FAIL"}] ${c.label}`);
-            if (pass) totalPass++;
-            else totalFail++;
-        }
-
-        // ── double round-trip stability ──
-        const md2 = await convert.html2md(htmlOut, HTML2MD_OPTS);
-        const stable = md === md2;
-        console.log(`  [${stable ? "PASS" : "FAIL"}] Double round-trip stable`);
-        if (stable) totalPass++;
-        else {
-            totalFail++;
-            const lines1 = md.split("\n");
-            const lines2 = md2.split("\n");
-            const maxLen = Math.max(lines1.length, lines2.length);
-            for (let i = 0; i < maxLen; i++) {
-                if (lines1[i] !== lines2[i]) {
-                    console.log(`    Line ${i + 1}:`);
-                    console.log(
-                        `      1st: ${JSON.stringify(lines1[i] ?? "(missing)")}`,
-                    );
-                    console.log(
-                        `      2nd: ${JSON.stringify(lines2[i] ?? "(missing)")}`,
-                    );
+        for (const check of point.checks) {
+            test(check.label, () => {
+                switch (check.type) {
+                    case "contains":
+                        expect(htmlOut).toContain(check.needle);
+                        break;
+                    case "not-contains":
+                        expect(htmlOut).not.toContain(check.needle);
+                        break;
+                    case "md-contains":
+                        expect(md).toContain(check.needle);
+                        break;
+                    case "md-not-contains":
+                        expect(md).not.toContain(check.needle);
+                        break;
+                    case "regex":
+                        expect(htmlOut).toMatch(check.pattern);
+                        break;
+                    case "md-regex":
+                        expect(md).toMatch(check.pattern);
+                        break;
                 }
-            }
+            });
         }
-    }
 
-    // ── Summary ──
-    banner("SUMMARY");
-    console.log(
-        `  Total: ${totalPass + totalFail}  Pass: ${totalPass}  Fail: ${totalFail}`,
-    );
-    console.log(`  Tests: ${active.map((t) => t.name).join(", ")}`);
-    if (totalFail > 0) process.exitCode = 1;
+        test("double round-trip stable", async () => {
+            expect(await convert.html2md(htmlOut, HTML2MD_OPTS)).toBe(md);
+        });
+    });
 }

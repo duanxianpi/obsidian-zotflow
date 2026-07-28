@@ -398,10 +398,40 @@ npm run build:plugin   # Production build: tsc check + esbuild (plugin only)
 npm run build:reader   # Production build: webpack prod mode (reader only)
 npm run build        # Production build: reader + plugin
 npm run build:ci     # Full CI: build pdf.js + reader + plugin
-npm run test:csl     # CSL core assertions (plain Node script, no framework;
-                     #   downloads fixtures into scripts/.csl-fixtures once)
+npm run test         # lint:convert + typecheck:tests + the whole vitest suite
+npm run test:vitest  # vitest, one shot
+npm run test:watch   # vitest, watch mode
+npm run typecheck:tests   # tsc over tests/ (uses tests/tsconfig.json)
 npm run lint         # eslint
 ```
+
+### Tests
+
+Vitest, configured in `vitest.config.ts`. Everything lives under `tests/`:
+
+| Path                | Contents                                                        |
+| ------------------- | --------------------------------------------------------------- |
+| `tests/unit/`       | Pure functions and the convert pipeline                          |
+| `tests/integration/`| Worker services driven through fakes                             |
+| `tests/fakes/`      | `resetDb`, `createFakeParentHost`, `createFakeZoteroServer`      |
+| `tests/fixtures/`   | Real CSL styles/locales, cached in `tests/.csl-fixtures/`        |
+| `tests/stubs/`      | Inert `obsidian` module                                          |
+| `tests/setup.ts`    | fake-indexeddb, `navigator.onLine`, one IndexedDB spec workaround |
+
+Two things worth knowing before writing a service test:
+
+- **The `db` singleton is real.** `tests/setup.ts` installs `fake-indexeddb`, so
+  `db/db.ts` opens the actual Dexie schema — real compound indexes, real
+  version upgrades. Call `resetDb()` in `beforeEach`. Do not mock `db/db`.
+- **Zotero is faked at the HTTP layer**, not at `ZoteroAPIService`.
+  `createFakeZoteroServer().install()` replaces `globalThis.fetch`, which is
+  where `worker.ts` installs its proxied fetch in production. That keeps
+  `Last-Modified-Version` bookkeeping, 412 conflicts, `format=versions` deltas
+  and request chunking under test instead of mocked away.
+
+`tests/unit/obsidian-syntax.test.ts` is a discovery harness as well as a
+regression gate. Run it with `ZF_SYNTAX_MATRIX=1` to print the syntax survival
+matrix and the list of known gaps.
 
 ### esbuild Custom Plugins
 

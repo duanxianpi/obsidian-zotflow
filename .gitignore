@@ -25,4 +25,4 @@ data.json
 meta.json
 
 # CSL test fixtures (downloaded on first test run)
-scripts/.csl-fixtures/
+tests/.csl-fixtures/

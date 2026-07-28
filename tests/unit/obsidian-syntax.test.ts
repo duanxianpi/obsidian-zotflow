@@ -1,15 +1,15 @@
 /**
  * Obsidian syntax survival matrix:  MD → HTML → MD
  *
- * A *discovery* harness, not a unit test. Every syntax Obsidian understands is
- * fed in as an isolated snippet, pushed through `md2html` and back through
- * `html2md`, and classified by what came out the other side. The output is the
- * coverage table — which Obsidian syntax survives a Zotero sync, which is
- * silently rewritten, and which is destroyed.
+ * A *discovery* harness first, a regression gate second. Every syntax Obsidian
+ * understands is fed in as an isolated snippet, pushed through `md2html` and
+ * back through `html2md`, and classified by what came out the other side. The
+ * result is a coverage table: which Obsidian syntax survives a Zotero sync,
+ * which is silently rewritten, and which is destroyed.
  *
- * Why this exists separately from `test-md-roundtrip`:
+ * Why this exists separately from md-roundtrip.test.ts:
  *
- *   That harness asks "does feature X behave as designed?" — each case asserts
+ *   That suite asks "does feature X behave as designed?" — each case asserts
  *   against hand-written expectations, so it can only fail for syntax someone
  *   already thought about. This one asks the opposite question, "what happens
  *   to syntax we may never have considered?", and answers it for the whole of
@@ -31,9 +31,9 @@
  * `expect` records the *current, reviewed* verdict for each case, so this file
  * doubles as a regression gate. Three outcomes are reported distinctly:
  *
- *   - worse than `expect`           → FAIL  (a regression)
- *   - matches `expect: "broken"`    → KNOWN (a documented gap, not a failure)
- *   - better than `expect`          → FIXED (update the expectation)
+ *   - worse than `expect`           → the test FAILS (a regression)
+ *   - matches `expect: "broken"`    → passes, listed as a documented gap
+ *   - better than `expect`          → passes, reported so `expect` gets updated
  *
  * Every case runs under both `strictLineBreaks` settings. The flag mirrors one
  * vault setting and is threaded into *both* directions from `vaultConfig` in
@@ -41,13 +41,14 @@
  * different values to md2html and html2md is what previously made `<br>`
  * handling look broken when it was not.
  *
- * Usage:
- *   node scripts/test-obsidian-syntax.mjs                # full matrix
- *   node scripts/test-obsidian-syntax.mjs callout embed  # filter by id/name
- *   node scripts/test-obsidian-syntax.mjs --verbose      # dump HTML + MD
- *   node scripts/test-obsidian-syntax.mjs --all          # list passes too
+ * The survival matrix itself is the discovery output, and printing it on every
+ * run would bury the assertions. Set `ZF_SYNTAX_MATRIX=1` to get it:
+ *
+ *   ZF_SYNTAX_MATRIX=1 npx vitest run tests/unit/obsidian-syntax.test.ts
+ *
+ * Migrated from scripts/_test-obsidian-syntax-entry.ts.
  */
-// @ts-ignore
+import { describe, test, afterAll } from "vitest";
 import { ConvertService } from "worker/services/convert";
 
 const convert = new ConvertService();
@@ -118,7 +119,7 @@ type Case = BaseCase &
 function sourceOf(c: Case): { text: string; from: "md" | "html" } {
     return c.md !== undefined
         ? { text: c.md, from: "md" }
-        : { text: c.html!, from: "html" };
+        : { text: c.html, from: "html" };
 }
 
 const GROUPS: { group: string; cases: Case[] }[] = [];
@@ -2222,10 +2223,6 @@ group("Verbatim handlers in cells", [
     },
 ]);
 
-/* ================================================================ */
-/*  Runner                                                          */
-/* ================================================================ */
-
 const ALL: Case[] = GROUPS.flatMap((g) => g.cases);
 
 /** Trailing whitespace and blank-line padding are formatting noise. */
@@ -2329,117 +2326,89 @@ function indent(s: string, prefix: string): string {
         .join("\n");
 }
 
-export async function run(argv?: string[]) {
-    const args = argv ?? [];
-    const verbose = args.includes("--verbose");
-    const showAll = args.includes("--all");
-    const filters = args.filter((a) => !a.startsWith("--"));
-
-    const active = filters.length
-        ? ALL.filter((c) =>
-              filters.some(
-                  (f) =>
-                      c.id.toLowerCase().includes(f.toLowerCase()) ||
-                      c.name.toLowerCase().includes(f.toLowerCase()),
-              ),
-          )
-        : ALL;
-
-    if (!active.length) {
-        console.log("[WARN] No cases matched the filter.");
-        return;
-    }
-
-    const rows: {
-        c: Case;
-        perMode: { mode: string; res: Result; outcome: Outcome }[];
-    }[] = [];
-
-    for (const c of active) {
-        const perMode = [];
-        for (const m of MODES) {
-            const res = await runCase(c, m.strictLineBreaks);
-            perMode.push({
-                mode: m.label,
-                res,
-                outcome: classify(c, res.verdict),
-            });
-        }
-        rows.push({ c, perMode });
-    }
-
-    /* ---- detail for anything not clean ------------------------- */
-
-    const interesting = rows.filter((r) =>
-        r.perMode.some((p) => p.outcome !== "OK"),
-    );
-    const detail = showAll ? rows : interesting;
-
-    if (detail.length) {
-        console.log("\n" + "=".repeat(76));
-        console.log(
-            showAll ? " ALL CASES" : " CASES NEEDING ATTENTION (--all to see every case)",
+/** Everything a failing case needs to be diagnosed without a re-run. */
+function describeFailure(c: Case, mode: string, res: Result): string {
+    const { text, from } = sourceOf(c);
+    const arrow = from === "md" ? "md → html → md" : "html → md → html";
+    const lines = [
+        `${c.name} [${c.id}]  ${c.syntax}  (${arrow}, ${mode})`,
+        `  verdict ${res.verdict}, expected at least ${c.expect.toUpperCase()}`,
+    ];
+    if (c.note) lines.push(indent(c.note, "  note: "));
+    if (res.missing.length) {
+        lines.push(
+            `  MISSING: ${res.missing.map((s) => JSON.stringify(s)).join(", ")}`,
         );
-        console.log("=".repeat(76));
     }
+    if (res.forbidden.length) {
+        lines.push(
+            `  FORBIDDEN PRESENT: ${res.forbidden.map((s) => JSON.stringify(s)).join(", ")}`,
+        );
+    }
+    lines.push(`  --- input (${from}) ---`, indent(text, "  | "));
+    lines.push(`  --- after one round trip ---`, indent(res.rt, "  > "));
 
-    for (const { c, perMode } of detail) {
-        const { text, from } = sourceOf(c);
-        const arrow = from === "md" ? "md → html → md" : "html → md → html";
-        console.log(`\n### ${c.name}  [${c.id}]   ${c.syntax}   (${arrow})`);
-        if (c.note) console.log(indent(c.note, "    | "));
-        console.log(`  --- input (${from}) ---`);
-        console.log(indent(text, "  | "));
-
-        for (const { mode, res, outcome } of perMode) {
-            console.log(`  --- ${mode} → ${res.verdict} (${outcome}) ---`);
-            if (outcome !== "OK" || verbose) {
-                console.log(indent(res.rt, "  > "));
-            }
-            if (res.missing.length) {
-                console.log(
-                    `    MISSING: ${res.missing.map((s) => JSON.stringify(s)).join(", ")}`,
+    if (res.verdict === "DRIFT") {
+        // A case can settle on pass 2 and still drift on pass 3; say which,
+        // because a two-pass check would have called the slow one stable.
+        const slow = norm(res.rt) === norm(res.rt2);
+        lines.push(
+            slow
+                ? "  !! DRIFTS ON THE THIRD PASS — a two-pass check would call this stable:"
+                : "  !! NOT A FIXED POINT — second pass differs:",
+        );
+        const a = (slow ? res.rt2 : res.rt).split("\n");
+        const b = (slow ? res.rt3 : res.rt2).split("\n");
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+            if (a[i] !== b[i]) {
+                lines.push(
+                    `    L${i + 1} before: ${JSON.stringify(a[i] ?? "(missing)")}`,
+                    `    L${i + 1} after : ${JSON.stringify(b[i] ?? "(missing)")}`,
                 );
-            }
-            if (res.forbidden.length) {
-                console.log(
-                    `    FORBIDDEN PRESENT: ${res.forbidden.map((s) => JSON.stringify(s)).join(", ")}`,
-                );
-            }
-            if (res.verdict === "DRIFT") {
-                const slow = norm(res.rt) === norm(res.rt2);
-                console.log(
-                    slow
-                        ? "    !! DRIFTS ON THE THIRD PASS — a two-pass check would call this stable:"
-                        : "    !! NOT A FIXED POINT — second pass differs:",
-                );
-                const a = (slow ? res.rt2 : res.rt).split("\n");
-                const b = (slow ? res.rt3 : res.rt2).split("\n");
-                for (let i = 0; i < Math.max(a.length, b.length); i++) {
-                    if (a[i] !== b[i]) {
-                        console.log(`      L${i + 1} before: ${JSON.stringify(a[i] ?? "(missing)")}`);
-                        console.log(`      L${i + 1} after : ${JSON.stringify(b[i] ?? "(missing)")}`);
-                    }
-                }
-            }
-            if (verbose) {
-                console.log(
-                    `    --- intermediate (${sourceOf(c).from === "md" ? "html" : "md"}) ---`,
-                );
-                console.log(indent(res.intermediate, "    . "));
             }
         }
     }
+    return lines.join("\n");
+}
 
-    /* ---- the matrix -------------------------------------------- */
+interface Row {
+    c: Case;
+    mode: string;
+    res: Result;
+    outcome: Outcome;
+}
 
-    const ICON: Record<Verdict, string> = {
-        VERBATIM: "OK  ",
-        CANONICAL: "~   ",
-        BROKEN: "X   ",
-        DRIFT: "DRIFT",
-    };
+const rows: Row[] = [];
 
+for (const { group: groupName, cases } of GROUPS) {
+    describe(groupName, () => {
+        for (const c of cases) {
+            for (const m of MODES) {
+                test(`${c.name} [${c.id}] ${m.label}`, async () => {
+                    const res = await runCase(c, m.strictLineBreaks);
+                    const outcome = classify(c, res.verdict);
+                    rows.push({ c, mode: m.label, res, outcome });
+                    if (outcome === "FAIL") {
+                        throw new Error(describeFailure(c, m.label, res));
+                    }
+                });
+            }
+        }
+    });
+}
+
+/* ================================================================ */
+/*  Discovery report                                                */
+/* ================================================================ */
+
+const ICON: Record<Verdict, string> = {
+    VERBATIM: "OK",
+    CANONICAL: "~",
+    BROKEN: "X",
+    DRIFT: "DRIFT",
+};
+
+function printMatrix() {
     console.log("\n" + "=".repeat(76));
     console.log(" OBSIDIAN SYNTAX SURVIVAL MATRIX");
     console.log("=".repeat(76));
@@ -2449,19 +2418,20 @@ export async function run(argv?: string[]) {
     console.log("  " + "-".repeat(72));
 
     for (const { group: gname, cases } of GROUPS) {
-        const mine = rows.filter((r) => cases.includes(r.c));
+        const mine = cases.filter((c) => rows.some((r) => r.c === c));
         if (!mine.length) continue;
         console.log(`  -- ${gname} --`);
-        for (const { c, perMode } of mine) {
-            const cells = perMode.map((p) => {
-                const mark = ICON[p.res.verdict].trim();
+        for (const c of mine) {
+            const cells = MODES.map((m) => {
+                const row = rows.find((r) => r.c === c && r.mode === m.label);
+                if (!row) return pad("-", 10);
                 const flag =
-                    p.outcome === "FAIL"
+                    row.outcome === "FAIL"
                         ? " !"
-                        : p.outcome === "FIXED"
+                        : row.outcome === "FIXED"
                           ? " +"
                           : "";
-                return pad(mark + flag, 10);
+                return pad(ICON[row.res.verdict] + flag, 10);
             });
             console.log(
                 `  ${pad(c.name, 30)} ${pad(c.syntax, 22)} ${cells.join(" ")}`,
@@ -2472,58 +2442,54 @@ export async function run(argv?: string[]) {
     console.log("  OK = verbatim   ~ = canonicalized   X = syntax lost");
     console.log("  DRIFT = not a fixed point (always a failure)");
     console.log("  ! = regression vs. expectation   + = better than expected");
+}
 
-    /* ---- summary ----------------------------------------------- */
+afterAll(() => {
+    if (!rows.length) return;
 
-    const flat = rows.flatMap((r) => r.perMode);
-    const count = (o: Outcome) => flat.filter((p) => p.outcome === o).length;
-    const fails = rows.filter((r) => r.perMode.some((p) => p.outcome === "FAIL"));
-    // Only worth re-declaring when *every* mode beat the expectation —
-    // `expect` is one value per case, so a syntax that is verbatim under one
-    // line-break setting and canonical under the other is correctly recorded
-    // as the weaker of the two.
-    const fixed = rows.filter((r) => r.perMode.every((p) => p.outcome === "FIXED"));
-    const known = rows.filter((r) =>
-        r.perMode.every((p) => p.outcome === "KNOWN"),
-    );
-
-    console.log("\n" + "=".repeat(76));
-    console.log(" SUMMARY");
-    console.log("=".repeat(76));
-    console.log(`  Cases: ${rows.length}   Runs: ${flat.length} (2 modes each)`);
-    console.log(
-        `  OK ${count("OK")}   KNOWN-GAP ${count("KNOWN")}   FIXED ${count("FIXED")}   FAIL ${count("FAIL")}`,
-    );
+    const byCase = ALL.map((c) => ({
+        c,
+        modes: rows.filter((r) => r.c === c),
+    })).filter((e) => e.modes.length > 0);
 
     // The three kinds of gap want three different responses, so they are never
     // mixed into one list: a schema limit is a fact, a settled decision is
     // closed, and only the last is work.
-    const groupsOfGap: [string, string, string][] = [
-        ["by-design", "-", "Lost to Zotero's schema — nothing to fix"],
-        ["wont-fix", "·", "Decided against — see each note for why"],
-        ["bug", "!", "Lost to the pipeline — fixable"],
-    ];
-    for (const [kind, marker, heading] of groupsOfGap) {
-        const rows = known.filter((r) => (r.c.gap ?? "bug") === kind);
-        if (!rows.length) continue;
-        console.log(`\n  ${heading} (${rows.length}):`);
-        for (const r of rows) {
-            console.log(`    ${marker} ${pad(r.c.name, 30)} ${r.c.syntax}`);
+    const known = byCase.filter((e) =>
+        e.modes.every((r) => r.outcome === "KNOWN"),
+    );
+    // Only worth re-declaring when *every* mode beat the expectation —
+    // `expect` is one value per case, so a syntax that is verbatim under one
+    // line-break setting and canonical under the other is correctly recorded
+    // as the weaker of the two.
+    const fixed = byCase.filter((e) =>
+        e.modes.every((r) => r.outcome === "FIXED"),
+    );
+
+    if (process.env.ZF_SYNTAX_MATRIX) {
+        printMatrix();
+
+        const groupsOfGap: [string, string, string][] = [
+            ["by-design", "-", "Lost to Zotero's schema — nothing to fix"],
+            ["wont-fix", "·", "Decided against — see each note for why"],
+            ["bug", "!", "Lost to the pipeline — fixable"],
+        ];
+        for (const [kind, marker, heading] of groupsOfGap) {
+            const mine = known.filter((e) => (e.c.gap ?? "bug") === kind);
+            if (!mine.length) continue;
+            console.log(`\n  ${heading} (${mine.length}):`);
+            for (const e of mine) {
+                console.log(`    ${marker} ${pad(e.c.name, 30)} ${e.c.syntax}`);
+            }
         }
     }
+
+    // Always surfaced: a case that outgrew its expectation is actionable even
+    // when the suite is green, and silence would let `expect` rot.
     if (fixed.length) {
-        console.log(`\n  Better than expected — update \`expect\`:`);
-        for (const r of fixed) console.log(`    + ${r.c.name}  (${r.c.id})`);
+        console.log(
+            `\n  Better than expected in every mode — update \`expect\` (${fixed.length}):`,
+        );
+        for (const e of fixed) console.log(`    + ${e.c.name}  (${e.c.id})`);
     }
-    if (fails.length) {
-        console.log(`\n  REGRESSIONS:`);
-        for (const r of fails) {
-            const modes = r.perMode
-                .filter((p) => p.outcome === "FAIL")
-                .map((p) => `${p.mode}=${p.res.verdict}`)
-                .join(", ");
-            console.log(`    ! ${r.c.name}  (${r.c.id})  ${modes}`);
-        }
-        process.exitCode = 1;
-    }
-}
+});

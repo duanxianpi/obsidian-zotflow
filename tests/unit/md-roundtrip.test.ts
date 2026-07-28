@@ -1,17 +1,17 @@
 /**
- * MD → HTML → MD round-trip test (Obsidian-style markdown).
+ * MD → HTML → MD round-trip (Obsidian-style markdown).
  *
- * Each test point is an isolated markdown snippet. Converted to Zotero
- * HTML via md2html, then back via html2md, and compared.
+ * Each test point is an isolated markdown snippet, converted to Zotero HTML
+ * via md2html then back via html2md. Every check inside a point becomes its
+ * own test case so a failure names the exact construct that drifted.
  *
- * Usage:
- *   node scripts/test-md-roundtrip.mjs                   # run all
- *   node scripts/test-md-roundtrip.mjs headings tables    # run only matching
+ * Migrated from scripts/_test-md-roundtrip-entry.ts.
  */
-// @ts-ignore
+import { describe, test, expect, beforeAll } from "vitest";
 import { ConvertService } from "worker/services/convert";
 
 const convert = new ConvertService();
+
 
 /**
  * `strictLineBreaks` mirrors ONE vault setting, so both directions must be
@@ -44,7 +44,7 @@ type Check =
 /*  Test Points                                                     */
 /* ================================================================ */
 
-const tests: TestPoint[] = [
+const testPoints: TestPoint[] = [
     // ── Bare URLs (GFM literal autolinks) must round-trip verbatim ──
     {
         name: "bare-urls",
@@ -704,75 +704,42 @@ This is a block comment.
     },
 ];
 
-/* ================================================================ */
-/*  Test Runner                                                     */
-/* ================================================================ */
+for (const point of testPoints) {
+    describe(point.name, () => {
+        let html: string;
+        let rt: string;
 
-function banner(label: string) {
-    console.log("\n" + "=".repeat(72));
-    console.log(` ${label}`);
-    console.log("=".repeat(72));
-}
+        beforeAll(async () => {
+            html = await convert.md2html(point.md, CONVERT_OPTS);
+            rt = await convert.html2md(html, CONVERT_OPTS);
+        });
 
-export async function run(filter?: string[]) {
-    const active = filter?.length
-        ? tests.filter((t) =>
-              filter.some((f) =>
-                  t.name.toLowerCase().includes(f.toLowerCase()),
-              ),
-          )
-        : tests;
-
-    if (active.length === 0) {
-        console.log("[WARN] No test points matched the filter.");
-        return;
-    }
-
-    let totalPass = 0;
-    let totalFail = 0;
-
-    for (const tp of active) {
-        banner(`TEST: ${tp.name}`);
-
-        // ── md → html ──
-        const html = await convert.md2html(tp.md, CONVERT_OPTS);
-        console.log("--- HTML ---");
-        console.log(html);
-
-        // ── html → md (round-trip) ──
-        const rt = await convert.html2md(html, CONVERT_OPTS);
-        console.log("--- MD (round-tripped) ---");
-        console.log(rt);
-
-        // ── checks ──
-        for (const c of tp.checks) {
-            let pass = false;
-            switch (c.type) {
-                case "html-contains":
-                    pass = html.includes(c.needle);
-                    break;
-                case "html-not-contains":
-                    pass = !html.includes(c.needle);
-                    break;
-                case "rt-contains":
-                    pass = rt.includes(c.needle);
-                    break;
-                case "rt-not-contains":
-                    pass = !rt.includes(c.needle);
-                    break;
-                case "html-regex":
-                    pass = c.pattern.test(html);
-                    break;
-                case "rt-regex":
-                    pass = c.pattern.test(rt);
-                    break;
-            }
-            console.log(`  [${pass ? "PASS" : "FAIL"}] ${c.label}`);
-            if (pass) totalPass++;
-            else totalFail++;
+        for (const check of point.checks) {
+            test(check.label, () => {
+                switch (check.type) {
+                    case "html-contains":
+                        expect(html).toContain(check.needle);
+                        break;
+                    case "html-not-contains":
+                        expect(html).not.toContain(check.needle);
+                        break;
+                    case "rt-contains":
+                        expect(rt).toContain(check.needle);
+                        break;
+                    case "rt-not-contains":
+                        expect(rt).not.toContain(check.needle);
+                        break;
+                    case "html-regex":
+                        expect(html).toMatch(check.pattern);
+                        break;
+                    case "rt-regex":
+                        expect(rt).toMatch(check.pattern);
+                        break;
+                }
+            });
         }
 
-        // ── idempotency: html2md(md2html(·)) must be a fixed point ──
+        // Idempotency: html2md(md2html(·)) must be a fixed point.
         //
         // Asserts `g(f(g(f(x)))) === g(f(x))`, not `f(g(f(x))) === f(x)`.
         // The round trip is allowed to canonicalize once — bullet markers
@@ -782,37 +749,9 @@ export async function run(filter?: string[]) {
         // grows a backslash each pass, an entity that re-encodes, a `<span>`
         // that accumulates. Demanding equality on the first pass conflates
         // the two and fails on inputs that were simply written by hand.
-        const html2 = await convert.md2html(rt, CONVERT_OPTS);
-        const rt2 = await convert.html2md(html2, CONVERT_OPTS);
-        const stable = rt === rt2;
-        console.log(`  [${stable ? "PASS" : "FAIL"}] Round-trip idempotent`);
-        if (stable) totalPass++;
-        else {
-            totalFail++;
-            const lines1 = rt.split("\n");
-            const lines2 = rt2.split("\n");
-            const maxLen = Math.max(lines1.length, lines2.length);
-            let shown = 0;
-            for (let i = 0; i < maxLen && shown < 10; i++) {
-                if (lines1[i] !== lines2[i]) {
-                    shown++;
-                    console.log(`    Line ${i + 1}:`);
-                    console.log(
-                        `      1st: ${JSON.stringify(lines1[i] ?? "(missing)")}`,
-                    );
-                    console.log(
-                        `      2nd: ${JSON.stringify(lines2[i] ?? "(missing)")}`,
-                    );
-                }
-            }
-        }
-    }
-
-    // ── Summary ──
-    banner("SUMMARY");
-    console.log(
-        `  Total: ${totalPass + totalFail}  Pass: ${totalPass}  Fail: ${totalFail}`,
-    );
-    console.log(`  Tests: ${active.map((t) => t.name).join(", ")}`);
-    if (totalFail > 0) process.exitCode = 1;
+        test("round-trip idempotent", async () => {
+            const html2 = await convert.md2html(rt, CONVERT_OPTS);
+            expect(await convert.html2md(html2, CONVERT_OPTS)).toBe(rt);
+        });
+    });
 }

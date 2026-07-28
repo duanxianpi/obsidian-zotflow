@@ -1,0 +1,17 @@
+{
+    // Kept separate from the root config so `npm run build:plugin` type-checks
+    // only shipping code. Tests are checked by `npm run typecheck:tests`.
+    //
+    // `baseUrl` is inherited from ../tsconfig.json and still resolves to
+    // <root>/src, so tests import modules by the same specifier the source does.
+    // `src` is included (not merely reached through imports) so the ambient
+    // declarations in src/types — the Obsidian API augmentations, the `citeproc`
+    // module shim — are in scope here exactly as they are for the real build.
+    "extends": "../tsconfig.json",
+    "compilerOptions": {
+        "types": ["node"],
+        "skipLibCheck": true,
+        "noEmit": true
+    },
+    "include": ["**/*.ts", "../src/**/*.ts", "../src/**/*.tsx"]
+}
