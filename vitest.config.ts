@@ -22,5 +22,13 @@ export default defineConfig({
         // Each file gets a fresh worker so the `db` singleton in one suite can
         // never leak into another.
         isolate: true,
+        coverage: {
+            provider: "v8",
+            // Opt-in per run: `npm run test:coverage -- --coverage.include=...`
+            // narrows it to whatever is being worked on. There is no global
+            // threshold — the number is a map of what is untested, not a gate.
+            include: ["src/**/*.ts"],
+            reporter: ["text", "html"],
+        },
     },
 });

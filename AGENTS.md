@@ -402,6 +402,7 @@ npm run test         # lint:convert + typecheck:tests + the whole vitest suite
 npm run test:vitest  # vitest, one shot
 npm run test:watch   # vitest, watch mode
 npm run typecheck:tests   # tsc over tests/ (uses tests/tsconfig.json)
+npm run test:coverage     # vitest + v8 coverage (text + html)
 npm run lint         # eslint
 ```
 
@@ -432,6 +433,18 @@ Two things worth knowing before writing a service test:
 `tests/unit/obsidian-syntax.test.ts` is a discovery harness as well as a
 regression gate. Run it with `ZF_SYNTAX_MATRIX=1` to print the syntax survival
 matrix and the list of known gaps.
+
+`SyncService` is covered by four files, split by what they hold still:
+`sync-orchestration` (which libraries a run touches, the 412 retry loop,
+progress and notices), `sync-pull`, `sync-push`, and `sync-guards` (paths
+`startSync` cannot reach, e.g. `pushDirtyItems` called directly by the task
+layer). `createSyncHarness()` in `tests/fakes/sync-harness.ts` wires all of it
+in one call.
+
+Coverage is a map of what is untested, not a gate — there is no threshold, and
+a green number proves only that a line ran. When a sync branch matters, confirm
+the test actually binds it by breaking the branch on purpose and watching the
+expected test fail.
 
 ### esbuild Custom Plugins
 

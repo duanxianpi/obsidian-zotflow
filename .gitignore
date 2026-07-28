@@ -26,3 +26,6 @@ meta.json
 
 # CSL test fixtures (downloaded on first test run)
 tests/.csl-fixtures/
+
+# vitest coverage reports
+coverage/

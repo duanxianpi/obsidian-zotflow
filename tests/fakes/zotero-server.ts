@@ -53,9 +53,21 @@ export interface RecordedRequest {
 
 /** Forced failure, consumed by the next matching request. */
 export interface FailureSpec {
-    status: number;
+    /** HTTP status to answer with. Ignored when `networkError` is set. */
+    status?: number;
     /** Only fail requests whose path contains this substring. */
     pathIncludes?: string;
+    /**
+     * Only fail requests using this method. Needed to target a write: reads
+     * and writes share the /items path, and reads happen first.
+     */
+    method?: string;
+    /**
+     * Reject the request instead of answering it, as a dropped connection
+     * would. The API client then throws an error with no `.response`, which
+     * is a different branch from any HTTP status.
+     */
+    networkError?: boolean;
     /** Response body. Defaults to a short text message. */
     body?: unknown;
     /** Extra response headers, e.g. `{ "Last-Modified-Version": "9" }`. */
@@ -85,6 +97,22 @@ export interface FakeLibraryHandle {
     }): FakeZoteroCollection;
     updateCollection(key: string, data: Record<string, unknown>): FakeZoteroCollection;
     deleteCollection(key: string): void;
+
+    /* -- write-outcome controls ---------------------------------------
+     * A Zotero write does not answer yes/no per item: the response splits
+     * the payload into `successful`, `unchanged` and `failed`, and sync
+     * takes a different branch for each. These let a test put a specific
+     * key into a specific bucket without hand-rolling a whole response. */
+
+    /** Report `key` under `failed` on the next write that includes it. */
+    rejectWrite(key: string, failure: { code: number; message: string }): void;
+    /** Report `key` under `unchanged` on the next write that includes it. */
+    treatAsUnchanged(key: string): void;
+    /**
+     * Store a submitted `from` key under `to` instead, echoing the new key
+     * back. Models the server declining a client-provided key on create.
+     */
+    remapKey(from: string, to: string): void;
 }
 
 export interface FakeZoteroServerOptions {
@@ -124,6 +152,10 @@ interface LibraryState {
     /** key → library version at the time of deletion. */
     deletedItems: Map<string, number>;
     deletedCollections: Map<string, number>;
+    /** Pending write outcomes, each consumed by the first write that hits it. */
+    rejects: Map<string, { code: number; message: string }>;
+    unchanged: Set<string>;
+    keyRemaps: Map<string, string>;
 }
 
 function json(body: unknown, version: number, status = 200): Response {
@@ -159,6 +191,9 @@ export function createFakeZoteroServer(
                 collections: new Map(),
                 deletedItems: new Map(),
                 deletedCollections: new Map(),
+                rejects: new Map(),
+                unchanged: new Set(),
+                keyRemaps: new Map(),
             };
             libraries.set(id, lib);
         }
@@ -241,6 +276,16 @@ export function createFakeZoteroServer(
             deleteCollection(key) {
                 lib.collections.delete(key);
                 lib.deletedCollections.set(key, ++lib.version);
+            },
+
+            rejectWrite(key, failure) {
+                lib.rejects.set(key, failure);
+            },
+            treatAsUnchanged(key) {
+                lib.unchanged.add(key);
+            },
+            remapKey(from, to) {
+                lib.keyRemaps.set(from, to);
             },
         };
     }
@@ -357,9 +402,34 @@ export function createFakeZoteroServer(
                 const newVersion = ++lib.version;
                 const successful: Record<string, FakeZoteroItem> = {};
                 const success: Record<string, string> = {};
+                const unchanged: Record<string, string> = {};
+                const failed: Record<
+                    string,
+                    { code: number; message: string }
+                > = {};
 
                 payload.forEach((raw, index) => {
-                    const key = String(raw.key ?? raw.data?.key ?? "");
+                    const submitted = String(raw.key ?? raw.data?.key ?? "");
+                    const slot = String(index);
+
+                    const reject = lib.rejects.get(submitted);
+                    if (reject) {
+                        lib.rejects.delete(submitted);
+                        failed[slot] = reject;
+                        return;
+                    }
+
+                    if (lib.unchanged.has(submitted)) {
+                        lib.unchanged.delete(submitted);
+                        unchanged[slot] = submitted;
+                        return;
+                    }
+
+                    // The server owns the key: it may store the item under a
+                    // different one than the client proposed.
+                    const key = lib.keyRemaps.get(submitted) ?? submitted;
+                    lib.keyRemaps.delete(submitted);
+
                     const stored: FakeZoteroItem = {
                         key,
                         version: newVersion,
@@ -368,12 +438,12 @@ export function createFakeZoteroServer(
                     };
                     lib.items.set(key, stored);
                     lib.deletedItems.delete(key);
-                    successful[String(index)] = stored;
-                    success[String(index)] = key;
+                    successful[slot] = stored;
+                    success[slot] = key;
                 });
 
                 return json(
-                    { successful, success, unchanged: {}, failed: {} },
+                    { successful, success, unchanged, failed },
                     newVersion,
                 );
             }
@@ -453,15 +523,21 @@ export function createFakeZoteroServer(
         requests.push(record);
 
         const failureIndex = failures.findIndex(
-            (f) => !f.pathIncludes || record.path.includes(f.pathIncludes),
+            (f) =>
+                (!f.pathIncludes || record.path.includes(f.pathIncludes)) &&
+                (!f.method || f.method.toUpperCase() === record.method),
         );
         if (failureIndex !== -1) {
             const failure = failures.splice(failureIndex, 1)[0]!;
+            if (failure.networkError) {
+                throw new TypeError(`fetch failed: ${record.path}`);
+            }
+            const status = failure.status ?? 500;
             return new Response(
                 typeof failure.body === "string" || failure.body === undefined
-                    ? ((failure.body as string) ?? `Forced ${failure.status}`)
+                    ? ((failure.body as string) ?? `Forced ${status}`)
                     : JSON.stringify(failure.body),
-                { status: failure.status, headers: failure.headers },
+                { status, headers: failure.headers },
             );
         }
 
