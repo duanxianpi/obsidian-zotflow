@@ -434,6 +434,17 @@ export class DbHelperService {
                             : foundParentPath
                         : breadcrumbs.join("/");
 
+                    // Nothing resolved: the collection row is gone while the
+                    // item still references it — an interrupted pull, or a
+                    // remote deletion whose member items have not come back
+                    // down yet. Treat the item as simply not being in that
+                    // collection. Keeping the empty string here would append a
+                    // blank segment, and `${libName}/${""}/` renders as a
+                    // doubled separator that reaches note bodies verbatim
+                    // (library-template feeds itemPaths to the note template,
+                    // which unlike NotePathService does not collapse slashes).
+                    if (!resolvedPath) continue;
+
                     collectionPathCache[cacheKey] = resolvedPath;
                     allCollPaths.push(resolvedPath);
                 }

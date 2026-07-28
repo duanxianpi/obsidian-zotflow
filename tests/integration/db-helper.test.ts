@@ -773,14 +773,29 @@ describe("getItemPaths", () => {
         expect(paths["999:ARTICLE1"]).toEqual(["Library 999/"]);
     });
 
-    test("a dangling collection reference degrades to an empty breadcrumb", async () => {
-        // Current behaviour, pinned rather than endorsed: the missing name
-        // leaves an empty segment, so the path doubles its separator. Callers
-        // that go through NotePathService are saved by its slash collapsing.
+    test("a dangling collection reference is treated as no collection", async () => {
+        // The row is gone while the item still names it — an interrupted pull,
+        // or a remote collection deletion whose member items have not been
+        // re-pulled. The item is, as far as the local DB knows, uncollected.
         const paths = await h.dbHelper.getItemPaths([
             { libraryID: USER_ID, key: "ARTICLE1", collections: ["GHOSTCOL"] },
         ]);
-        expect(paths["1:ARTICLE1"]).toEqual(["My Library//"]);
+        expect(paths["1:ARTICLE1"]).toEqual(["My Library/"]);
+    });
+
+    test("a dangling reference alongside a real one drops only the dangling", async () => {
+        await seedCollection({ libraryID: USER_ID, key: "COLL0001", name: "One" });
+
+        const paths = await h.dbHelper.getItemPaths([
+            {
+                libraryID: USER_ID,
+                key: "ARTICLE1",
+                collections: ["COLL0001", "GHOSTCOL"],
+            },
+        ]);
+        // Not "My Library/" as an extra entry: the item's real membership is
+        // the only thing worth reporting.
+        expect(paths["1:ARTICLE1"]).toEqual(["My Library/One/"]);
     });
 
     test("empty strings in the collection list are ignored", async () => {
