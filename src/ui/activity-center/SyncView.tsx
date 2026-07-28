@@ -5,20 +5,10 @@ import { services } from "services/services";
 
 import type {
     ConflictItemInfo,
-    ConflictCollectionInfo,
     ConflictAction,
     FieldDiff,
 } from "worker/services/conflict";
 import type { LibraryRow } from "worker/services/key";
-
-/* ================================================================ */
-/*  Types                                                           */
-/* ================================================================ */
-
-interface ConflictEntry {
-    kind: "item" | "collection";
-    data: ConflictItemInfo | ConflictCollectionInfo;
-}
 
 /* ================================================================ */
 /*  Helpers                                                         */
@@ -46,23 +36,13 @@ async function loadLibraries(): Promise<LibraryRow[]> {
     return workerBridge.key.getLibraryRows(services.settings);
 }
 
-/** Load all conflicts via the ConflictService in the worker. */
-async function loadConflicts(): Promise<ConflictEntry[]> {
-    const [itemConflicts, colConflicts] = await Promise.all([
-        workerBridge.conflict.getItemConflicts(),
-        workerBridge.conflict.getCollectionConflicts(),
-    ]);
-
-    const entries: ConflictEntry[] = [];
-
-    for (const ic of itemConflicts) {
-        entries.push({ kind: "item", data: ic });
-    }
-    for (const cc of colConflicts) {
-        entries.push({ kind: "collection", data: cc });
-    }
-
-    return entries;
+/**
+ * Load all conflicts via the ConflictService in the worker.
+ *
+ * Items only: collections are pull-only, so they never conflict.
+ */
+async function loadConflicts(): Promise<ConflictItemInfo[]> {
+    return workerBridge.conflict.getItemConflicts();
 }
 
 /* ================================================================ */
@@ -206,13 +186,13 @@ const LibraryTable: React.FC<{
 };
 
 const ConflictPanel: React.FC<{
-    conflicts: ConflictEntry[];
+    conflicts: ConflictItemInfo[];
     selectedKey: string | null;
     onSelect: (key: string) => void;
-    onResolve: (entry: ConflictEntry, action: ConflictAction) => void;
+    onResolve: (entry: ConflictItemInfo, action: ConflictAction) => void;
 }> = ({ conflicts, selectedKey, onSelect, onResolve }) => {
     const selected = conflicts.find(
-        (c) => `${c.data.libraryID}:${c.data.key}` === selectedKey,
+        (c) => `${c.libraryID}:${c.key}` === selectedKey,
     );
 
     if (conflicts.length === 0) {
@@ -232,15 +212,7 @@ const ConflictPanel: React.FC<{
             {/* Conflict list sidebar */}
             <div className="zotflow-conflict-list">
                 {conflicts.map((c) => {
-                    const id = `${c.data.libraryID}:${c.data.key}`;
-                    const label =
-                        c.kind === "item"
-                            ? (c.data as ConflictItemInfo).title
-                            : (c.data as ConflictCollectionInfo).name;
-                    const badge =
-                        c.kind === "item"
-                            ? (c.data as ConflictItemInfo).conflictType
-                            : "collection";
+                    const id = `${c.libraryID}:${c.key}`;
 
                     return (
                         <div
@@ -250,16 +222,16 @@ const ConflictPanel: React.FC<{
                         >
                             <div className="zotflow-conflict-item-header">
                                 <span className="zotflow-conflict-key">
-                                    {c.data.key}
+                                    {c.key}
                                 </span>
                                 <span
-                                    className={`zotflow-conflict-type-badge zotflow-conflict-type-badge--${badge}`}
+                                    className={`zotflow-conflict-type-badge zotflow-conflict-type-badge--${c.conflictType}`}
                                 >
-                                    {badge}
+                                    {c.conflictType}
                                 </span>
                             </div>
                             <span className="zotflow-conflict-title">
-                                {label}
+                                {c.title}
                             </span>
                         </div>
                     );
@@ -296,29 +268,21 @@ const DEFAULT_HIDDEN_FIELDS = new Set([
 ]);
 
 const ConflictDiffPane: React.FC<{
-    entry: ConflictEntry;
-    onResolve: (entry: ConflictEntry, action: ConflictAction) => void;
+    entry: ConflictItemInfo;
+    onResolve: (entry: ConflictItemInfo, action: ConflictAction) => void;
 }> = ({ entry, onResolve }) => {
-    const isItem = entry.kind === "item";
-    const heading = isItem
-        ? (entry.data as ConflictItemInfo).title
-        : (entry.data as ConflictCollectionInfo).name;
-
-    const fields = entry.data.fields.filter(
+    const fields = entry.fields.filter(
         (f) => !DEFAULT_HIDDEN_FIELDS.has(f.field),
     );
-    const syncError = isItem
-        ? (entry.data as ConflictItemInfo).syncError
-        : (entry.data as ConflictCollectionInfo).syncError;
 
     return (
         <div className="zotflow-conflict-diff">
-            <span className="zotflow-conflict-diff-heading">{heading}</span>
+            <span className="zotflow-conflict-diff-heading">{entry.title}</span>
 
-            {syncError && (
+            {entry.syncError && (
                 <div className="zotflow-conflict-sync-error">
                     <ObsidianIcon icon="alert-triangle" />
-                    <span>{syncError}</span>
+                    <span>{entry.syncError}</span>
                 </div>
             )}
 
@@ -385,7 +349,7 @@ const ConflictDiffPane: React.FC<{
 /** React component showing library sync controls and merge conflict resolution UI. */
 export const SyncView: React.FC = () => {
     const [libraries, setLibraries] = useState<LibraryRow[]>([]);
-    const [conflicts, setConflicts] = useState<ConflictEntry[]>([]);
+    const [conflicts, setConflicts] = useState<ConflictItemInfo[]>([]);
     const [selectedConflict, setSelectedConflict] = useState<string | null>(
         null,
     );
@@ -483,22 +447,14 @@ export const SyncView: React.FC = () => {
 
     // Conflict resolution via ConflictService in worker
     const handleResolve = useCallback(
-        async (entry: ConflictEntry, action: ConflictAction) => {
-            const { libraryID, key } = entry.data;
+        async (entry: ConflictItemInfo, action: ConflictAction) => {
+            const { libraryID, key } = entry;
             try {
-                if (entry.kind === "item") {
-                    await workerBridge.conflict.resolveItemConflict(
-                        libraryID,
-                        key,
-                        action,
-                    );
-                } else {
-                    await workerBridge.conflict.resolveCollectionConflict(
-                        libraryID,
-                        key,
-                        action,
-                    );
-                }
+                await workerBridge.conflict.resolveItemConflict(
+                    libraryID,
+                    key,
+                    action,
+                );
 
                 services.logService.info(
                     `Conflict resolved (${action}): ${key}`,
@@ -514,11 +470,7 @@ export const SyncView: React.FC = () => {
                 // Remove from local state
                 setConflicts((prev) =>
                     prev.filter(
-                        (c) =>
-                            !(
-                                c.data.libraryID === libraryID &&
-                                c.data.key === key
-                            ),
+                        (c) => !(c.libraryID === libraryID && c.key === key),
                     ),
                 );
 

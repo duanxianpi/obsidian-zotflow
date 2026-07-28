@@ -2,13 +2,16 @@
  * ConflictService — what the Activity Center shows for a stuck row, and what
  * resolving it does to the DB.
  *
+ * Items only: collections are pull-only, so they never enter a dirty state and
+ * cannot conflict.
+ *
  * The stakes are asymmetric: "keep local" must leave a row the next push can
  * actually upload (wrong version → a permanent 412 loop), and "accept remote"
  * must not silently discard a row the server still has.
  */
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import { ConflictService } from "worker/services/conflict";
-import { db, resetDb, seedItem, seedCollection, seedLibrary } from "../fakes/db";
+import { db, resetDb, seedItem, seedLibrary } from "../fakes/db";
 import { createFakeParentHost } from "../fakes/parent-host";
 
 import type { FakeParentHost } from "../fakes/parent-host";
@@ -64,28 +67,6 @@ async function conflictedItem(over: Record<string, unknown> = {}) {
     } as any);
 }
 
-async function conflictedCollection(over: Record<string, unknown> = {}) {
-    await seedCollection({
-        libraryID: LIB,
-        key: "COLL0001",
-        syncStatus: "conflict",
-        syncError: "Remote update conflict",
-        name: "Local name",
-        version: 7,
-        raw: {
-            key: "COLL0001",
-            version: 3,
-            data: { key: "COLL0001", version: 3, name: "Local name" },
-        } as any,
-        serverCopyRaw: {
-            key: "COLL0001",
-            version: 7,
-            data: { key: "COLL0001", version: 7, name: "Remote name" },
-        } as any,
-        ...over,
-    } as any);
-}
-
 describe("listing conflicts", () => {
     test("only conflicted rows are reported", async () => {
         await conflictedItem();
@@ -129,13 +110,6 @@ describe("listing conflicts", () => {
         vi.spyOn(db.libraries, "toArray").mockRejectedValue(new Error("boom"));
         await expect(conflict.getItemConflicts()).rejects.toThrow(
             /Failed to query item conflicts/i,
-        );
-    });
-
-    test("a read failure on the collection side is reported too", async () => {
-        vi.spyOn(db.libraries, "toArray").mockRejectedValue(new Error("boom"));
-        await expect(conflict.getCollectionConflicts()).rejects.toThrow(
-            /Failed to query collection conflicts/i,
         );
     });
 });
@@ -327,81 +301,6 @@ describe("resolving an item", () => {
     });
 });
 
-describe("resolving a collection", () => {
-    test("keep-local queues it and stamps the server version", async () => {
-        await conflictedCollection();
-
-        await conflict.resolveCollectionConflict(LIB, "COLL0001", "keep-local");
-
-        const stored = (await db.collections.get([LIB, "COLL0001"]))!;
-        expect(stored.syncStatus).toBe("updated");
-        expect(stored.serverCopyRaw).toBeUndefined();
-        expect(stored.name).toBe("Local name");
-        expect((stored.raw as any).version).toBe(7);
-    });
-
-    test("accept-remote re-derives the row from the server copy", async () => {
-        await conflictedCollection();
-
-        await conflict.resolveCollectionConflict(
-            LIB,
-            "COLL0001",
-            "accept-remote",
-        );
-
-        const stored = (await db.collections.get([LIB, "COLL0001"]))!;
-        expect(stored.syncStatus).toBe("synced");
-        expect(stored.name).toBe("Remote name");
-    });
-
-    test("accept-remote on a remote deletion removes it", async () => {
-        await conflictedCollection({ serverCopyRaw: undefined });
-
-        await conflict.resolveCollectionConflict(
-            LIB,
-            "COLL0001",
-            "accept-remote",
-        );
-
-        expect(await db.collections.get([LIB, "COLL0001"])).toBeUndefined();
-    });
-
-    test("a collection deleted remotely is diffed as a whole", async () => {
-        await conflictedCollection({ serverCopyRaw: undefined });
-        const [info] = await conflict.getCollectionConflicts();
-
-        expect(info!.fields).toHaveLength(1);
-        expect(info!.fields[0]!.field).toBe("(entire collection)");
-        expect(info!.fields[0]!.remoteValue).toBe("(deleted on server)");
-    });
-
-    test("a nameless collection is labelled by key", async () => {
-        await conflictedCollection({ name: "" });
-        const [info] = await conflict.getCollectionConflicts();
-        expect(info!.name).toBe("COLL0001");
-    });
-
-    test("an unknown collection is an error", async () => {
-        await expect(
-            conflict.resolveCollectionConflict(LIB, "MISSING1", "keep-local"),
-        ).rejects.toThrow(/Collection not found: 1\/MISSING1/);
-    });
-
-    test("a collection no longer in conflict is skipped", async () => {
-        await seedCollection({
-            libraryID: LIB,
-            key: "COLL0001",
-            syncStatus: "synced",
-        });
-
-        await conflict.resolveCollectionConflict(LIB, "COLL0001", "keep-local");
-
-        expect((await db.collections.get([LIB, "COLL0001"]))!.syncStatus).toBe(
-            "synced",
-        );
-    });
-});
-
 describe("batch resolution", () => {
     test("every conflicted item is resolved and counted", async () => {
         await conflictedItem();
@@ -442,23 +341,6 @@ describe("batch resolution", () => {
 
     test("nothing to resolve reports zero", async () => {
         expect(await conflict.resolveAllItemConflicts("keep-local")).toBe(0);
-        expect(await conflict.resolveAllCollectionConflicts("keep-local")).toBe(
-            0,
-        );
-    });
-
-    test("collections resolve in bulk too", async () => {
-        await conflictedCollection();
-        await seedCollection({
-            libraryID: LIB,
-            key: "COLL0002",
-            syncStatus: "conflict",
-        });
-
-        expect(await conflict.resolveAllCollectionConflicts("keep-local")).toBe(
-            2,
-        );
-        expect(await conflict.getCollectionConflicts()).toEqual([]);
     });
 
     test("a failure mid-batch propagates rather than being swallowed", async () => {

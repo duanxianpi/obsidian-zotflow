@@ -321,58 +321,15 @@ export class SyncService {
                     const newCollections = batchRes.raw;
 
                     if (newCollections.length > 0) {
-                        // Check one by one inside transaction
+                        // Collections are pull-only: nothing in the plugin
+                        // edits one locally, so the server copy always wins and
+                        // there is no local state to read first.
                         await db.transaction("rw", db.collections, async () => {
-                            const promises = newCollections.map(
-                                async (remoteRaw: any) => {
-                                    // Get local state
-                                    const localCol = await db.collections.get([
-                                        libraryID,
-                                        remoteRaw.key,
-                                    ]);
-
-                                    // Conflict check logic (Preserved from original)
-                                    if (localCol) {
-                                        switch (localCol.syncStatus) {
-                                            case "created":
-                                            case "updated":
-                                            case "deleted":
-                                            case "conflict":
-                                                this.parentHost.log(
-                                                    "warn",
-                                                    `Collection Conflict: ${localCol.name} (${localCol.key})`,
-                                                    "SyncService",
-                                                );
-
-                                                await db.collections.update(
-                                                    [libraryID, localCol.key],
-                                                    {
-                                                        syncStatus: "conflict",
-                                                        syncError:
-                                                            "Remote update conflict (Renamed or Moved).",
-                                                        version:
-                                                            remoteRaw.version,
-                                                        serverCopyRaw:
-                                                            remoteRaw,
-                                                    },
-                                                );
-                                                return; // Skip overwrite
-
-                                            case "synced":
-                                                break;
-                                        }
-                                    }
-                                    // Local is Clean or New
-                                    const cleanCol = normalizeCollection(
-                                        remoteRaw,
-                                        libraryID,
-                                    );
-                                    cleanCol.syncStatus = "synced";
-                                    await db.collections.put(cleanCol);
-                                },
+                            await db.collections.bulkPut(
+                                newCollections.map((remoteRaw: any) =>
+                                    normalizeCollection(remoteRaw, libraryID),
+                                ),
                             );
-
-                            await Promise.all(promises);
                         });
                     }
 
@@ -441,44 +398,20 @@ export class SyncService {
                     libraryID,
                     targetKey,
                 );
+                // Collections are pull-only, so there are never local changes
+                // to weigh against a remote deletion — unlike items, which get
+                // a dirty-family check before the cascade runs.
                 const family = [targetCol, ...descendants];
 
-                // Check dirty data
-                const dirtyNode = family.find((col) =>
-                    ["created", "updated", "deleted", "conflict"].includes(
-                        col.syncStatus,
-                    ),
+                await db.collections.bulkDelete(
+                    family.map((c) => [libraryID, c.key]),
                 );
 
-                if (dirtyNode) {
-                    // Prevent deletion
-                    this.parentHost.log(
-                        "warn",
-                        `Prevented deletion of Collection ${targetKey}. Reason: Local changes in ${dirtyNode.key}.`,
-                        "SyncService",
-                    );
-
-                    // Mark as conflict
-                    await db.collections.update([libraryID, targetKey], {
-                        syncStatus: "conflict",
-                        syncError:
-                            "Remote deletion blocked: Contains unsynced local changes.",
-                    });
-                } else {
-                    // Safe deletion
-                    const keysToRemove = family.map((c) => c.key);
-
-                    // Physical deletion
-                    await db.collections.bulkDelete(
-                        keysToRemove.map((k) => [libraryID, k]),
-                    );
-
-                    this.parentHost.log(
-                        "debug",
-                        `Deleted Collection ${targetKey} and ${descendants.length} sub-collections.`,
-                        "SyncService",
-                    );
-                }
+                this.parentHost.log(
+                    "debug",
+                    `Deleted Collection ${targetKey} and ${descendants.length} sub-collections.`,
+                    "SyncService",
+                );
             }
         });
     }

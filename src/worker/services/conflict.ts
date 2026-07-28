@@ -1,9 +1,9 @@
 import { db } from "db/db";
-import { normalizeItem, normalizeCollection } from "db/normalize";
+import { normalizeItem } from "db/normalize";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
 import type { IParentProxy } from "bridge/types";
-import type { AnyIDBZoteroItem, IDBZoteroCollection } from "types/db-schema";
+import type { AnyIDBZoteroItem } from "types/db-schema";
 
 /* ================================================================ */
 /*  Public types                                                   */
@@ -32,15 +32,6 @@ export interface ConflictItemInfo {
     itemType: string;
     title: string;
     conflictType: ItemConflictType;
-    syncError: string;
-    fields: FieldDiff[];
-}
-
-/** Full detail of a single collection-level sync conflict. */
-export interface ConflictCollectionInfo {
-    libraryID: number;
-    key: string;
-    name: string;
     syncError: string;
     fields: FieldDiff[];
 }
@@ -81,34 +72,6 @@ export class ConflictService {
                 ZotFlowErrorCode.DB_OPEN_FAILED,
                 "ConflictService",
                 "Failed to query item conflicts",
-            );
-        }
-    }
-
-    /** Return all collection-level conflicts across all libraries. */
-    async getCollectionConflicts(): Promise<ConflictCollectionInfo[]> {
-        try {
-            const allLibs = await db.libraries.toArray();
-            const results: ConflictCollectionInfo[] = [];
-
-            for (const lib of allLibs) {
-                const cols = await db.collections
-                    .where("[libraryID+syncStatus]")
-                    .equals([lib.id, "conflict"])
-                    .toArray();
-
-                for (const col of cols) {
-                    results.push(this.buildCollectionConflictInfo(col));
-                }
-            }
-
-            return results;
-        } catch (e) {
-            throw ZotFlowError.wrap(
-                e,
-                ZotFlowErrorCode.DB_OPEN_FAILED,
-                "ConflictService",
-                "Failed to query collection conflicts",
             );
         }
     }
@@ -163,55 +126,6 @@ export class ConflictService {
     }
 
     /* ================================================================ */
-    /*  Resolution — Collections                                       */
-    /* ================================================================ */
-
-    async resolveCollectionConflict(
-        libraryID: number,
-        key: string,
-        action: ConflictAction,
-    ): Promise<void> {
-        try {
-            const col = await db.collections.get([libraryID, key]);
-            if (!col) {
-                throw new ZotFlowError(
-                    ZotFlowErrorCode.RESOURCE_MISSING,
-                    "ConflictService",
-                    `Collection not found: ${libraryID}/${key}`,
-                );
-            }
-
-            if (col.syncStatus !== "conflict") {
-                this.parentHost.log(
-                    "warn",
-                    `Collection ${key} is not in conflict, skipping.`,
-                    "ConflictService",
-                );
-                return;
-            }
-
-            if (action === "keep-local") {
-                await this.keepLocalCollection(col);
-            } else {
-                await this.acceptRemoteCollection(col);
-            }
-
-            this.parentHost.log(
-                "info",
-                `Resolved collection conflict ${key} → ${action}`,
-                "ConflictService",
-            );
-        } catch (e) {
-            throw ZotFlowError.wrap(
-                e,
-                ZotFlowErrorCode.DB_WRITE_FAILED,
-                "ConflictService",
-                `Failed to resolve collection conflict ${key}`,
-            );
-        }
-    }
-
-    /* ================================================================ */
     /*  Batch resolution                                               */
     /* ================================================================ */
 
@@ -227,25 +141,6 @@ export class ConflictService {
         this.parentHost.log(
             "info",
             `Batch-resolved ${resolved} item conflicts → ${action}`,
-            "ConflictService",
-        );
-        return resolved;
-    }
-
-    async resolveAllCollectionConflicts(
-        action: ConflictAction,
-    ): Promise<number> {
-        const conflicts = await this.getCollectionConflicts();
-        let resolved = 0;
-
-        for (const c of conflicts) {
-            await this.resolveCollectionConflict(c.libraryID, c.key, action);
-            resolved++;
-        }
-
-        this.parentHost.log(
-            "info",
-            `Batch-resolved ${resolved} collection conflicts → ${action}`,
             "ConflictService",
         );
         return resolved;
@@ -278,23 +173,6 @@ export class ConflictService {
         });
     }
 
-    /**
-     * Keep local collection. Same strategy — update version in raw payload.
-     */
-    private async keepLocalCollection(col: IDBZoteroCollection): Promise<void> {
-        const updatedRaw = { ...col.raw, version: col.version };
-        if (updatedRaw.data) {
-            updatedRaw.data = { ...updatedRaw.data, version: col.version };
-        }
-
-        await db.collections.update([col.libraryID, col.key], {
-            syncStatus: "updated",
-            syncError: "",
-            serverCopyRaw: undefined,
-            raw: updatedRaw,
-        });
-    }
-
     /* ================================================================ */
     /*  Private — accept-remote logic                                  */
     /* ================================================================ */
@@ -318,29 +196,6 @@ export class ConflictService {
         (normalized as AnyIDBZoteroItem).serverCopyRaw = undefined;
 
         await db.items.put(normalized);
-    }
-
-    /**
-     * Accept remote collection version.
-     */
-    private async acceptRemoteCollection(
-        col: IDBZoteroCollection,
-    ): Promise<void> {
-        if (!col.serverCopyRaw) {
-            // Remote deleted — remove locally
-            await db.collections.delete([col.libraryID, col.key]);
-            return;
-        }
-
-        const normalized = normalizeCollection(
-            col.serverCopyRaw,
-            col.libraryID,
-        );
-        normalized.syncStatus = "synced";
-        normalized.syncError = "";
-        normalized.serverCopyRaw = undefined;
-
-        await db.collections.put(normalized);
     }
 
     /* ================================================================ */
@@ -419,40 +274,6 @@ export class ConflictService {
             localData as unknown as Record<string, unknown>,
             remoteData as unknown as Record<string, unknown>,
         );
-    }
-
-    /**
-     * Build a ConflictCollectionInfo from an IDB collection.
-     */
-    private buildCollectionConflictInfo(
-        col: IDBZoteroCollection,
-    ): ConflictCollectionInfo {
-        const localData = col.raw?.data;
-        const remoteData = col.serverCopyRaw?.data;
-        let fields: FieldDiff[] = [];
-
-        if (localData && remoteData) {
-            fields = this.diffObjects(
-                localData as unknown as Record<string, unknown>,
-                remoteData as unknown as Record<string, unknown>,
-            );
-        } else if (!remoteData) {
-            fields = [
-                {
-                    field: "(entire collection)",
-                    localValue: JSON.stringify(localData, null, 2),
-                    remoteValue: "(deleted on server)",
-                },
-            ];
-        }
-
-        return {
-            libraryID: col.libraryID,
-            key: col.key,
-            name: col.name || col.key,
-            syncError: col.syncError || "",
-            fields,
-        };
     }
 
     /**

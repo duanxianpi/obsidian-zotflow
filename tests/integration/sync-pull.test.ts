@@ -473,27 +473,28 @@ describe("collection pull", () => {
         expect(await db.collections.count()).toBe(1);
     });
 
-    for (const status of DIRTY_STATUSES) {
-        test(`a local "${status}" collection hit by a remote edit becomes a conflict`, async () => {
-            h = await createSyncHarness();
-            const lib = h.server.library(USER_ID);
-            lib.addCollection({ key: "CCCCCCCC", data: { name: "Original" } });
-            await h.sync.startSync();
+    test("the server copy wins unconditionally — collections are pull-only", async () => {
+        // Nothing in the plugin dirties a collection, so the pull does not
+        // read local state before overwriting. A row that somehow carried a
+        // dirty status would still be replaced rather than flagged.
+        h = await createSyncHarness();
+        const lib = h.server.library(USER_ID);
+        lib.addCollection({ key: "CCCCCCCC", data: { name: "Original" } });
+        await h.sync.startSync();
 
-            await db.collections.update([USER_ID, "CCCCCCCC"], {
-                syncStatus: status,
-                name: "My local name",
-            });
-            lib.updateCollection("CCCCCCCC", { name: "Remote name" });
-
-            await h.sync.startSync();
-
-            const stored = await db.collections.get([USER_ID, "CCCCCCCC"]);
-            expect(stored!.syncStatus).toBe("conflict");
-            expect(stored!.name).toBe("My local name");
-            expect((stored!.serverCopyRaw as any).data.name).toBe("Remote name");
+        await db.collections.update([USER_ID, "CCCCCCCC"], {
+            syncStatus: "updated",
+            name: "Somehow local",
         });
-    }
+        lib.updateCollection("CCCCCCCC", { name: "Remote name" });
+
+        await h.sync.startSync();
+
+        const stored = (await db.collections.get([USER_ID, "CCCCCCCC"]))!;
+        expect(stored.syncStatus).toBe("synced");
+        expect(stored.name).toBe("Remote name");
+        expect(stored.serverCopyRaw).toBeUndefined();
+    });
 
     test("a remotely deleted collection is removed locally", async () => {
         h = await createSyncHarness();
@@ -531,27 +532,6 @@ describe("collection pull", () => {
         await h.sync.startSync();
 
         expect(await db.collections.count()).toBe(0);
-    });
-
-    test("an unsynced subcollection blocks the parent's deletion", async () => {
-        h = await createSyncHarness();
-        const lib = h.server.library(USER_ID);
-        lib.addCollection({ key: "ROOTCOLL" });
-        await h.sync.startSync();
-
-        await seedCollection({
-            libraryID: USER_ID,
-            key: "CHILDCOL",
-            parentCollection: "ROOTCOLL",
-            syncStatus: "updated",
-        });
-
-        lib.deleteCollection("ROOTCOLL");
-        await h.sync.startSync();
-
-        const root = await db.collections.get([USER_ID, "ROOTCOLL"]);
-        expect(root!.syncStatus).toBe("conflict");
-        expect(await db.collections.count()).toBe(2);
     });
 
     test("a cyclic parentCollection does not stall the deletion cascade", async () => {
