@@ -230,9 +230,17 @@ describe("creating a child note", () => {
         expect((stored.raw.data as any).note).toBe("");
     });
 
-    test("the generated key looks like a Zotero key", async () => {
-        const key = await service.createChildNote(LIB, "PARENT01");
-        expect(key).toMatch(/^[23456789A-HJ-NP-Z]{8}$/);
+    test("the generated key uses Zotero's unambiguous alphabet", async () => {
+        // 0, 1 and O are excluded so a key is never misread; I is kept.
+        const ZOTERO_KEY = /^[23456789A-NP-Z]{8}$/;
+
+        // Sampling once would only catch a wrong character class about one run
+        // in five, which is a flake rather than a test.
+        for (let i = 0; i < 50; i++) {
+            expect(await service.createChildNote(LIB, "PARENT01")).toMatch(
+                ZOTERO_KEY,
+            );
+        }
     });
 
     test("successive notes get distinct keys", async () => {
