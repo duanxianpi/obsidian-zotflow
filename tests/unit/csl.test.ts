@@ -7,7 +7,7 @@
  *
  * Migrated from scripts/test-csl.mjs.
  */
-import { describe, test, expect, beforeAll } from "vitest";
+import { describe, test, expect, beforeAll, vi } from "vitest";
 import {
     CslRenderService,
     MemoryKVStore,
@@ -16,6 +16,13 @@ import {
     slugFromStyleUri,
 } from "worker/csl";
 import { loadCslFixtures } from "../fixtures/csl";
+
+// Building a citeproc engine against a real style costs ~0.5-1.2s, and these
+// cases build several. Run alone that fits the 5s default comfortably; run
+// alongside the rest of the suite it does not, because vitest schedules the
+// files in parallel and a loaded machine stretches each engine build several
+// times over. The default is calibrated for tests that do no such work.
+vi.setConfig({ testTimeout: 30_000 });
 
 import type { ResourceFetcher } from "worker/csl";
 import type { CSLItem } from "worker/csl";
