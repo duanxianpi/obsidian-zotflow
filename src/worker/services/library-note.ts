@@ -365,8 +365,12 @@ export class LibraryNoteService {
                     forceUpdateImages,
                 );
             } else {
-                // Case B: File does not exist or frontmatter is different -> Create new file
-                await this.performCreate(item, path);
+                // Case B: File does not exist or frontmatter is different ->
+                // Create new file. The write may land on a suffixed path when
+                // the target is taken, so the caller must be told where the
+                // note actually went — openNote would otherwise open the file
+                // that caused the collision.
+                path = await this.performCreate(item, path);
 
                 // Post processing: Extract images (if setting is enabled)
                 if (this.settings.autoImportAnnotationImages) {
@@ -489,9 +493,15 @@ export class LibraryNoteService {
     }
 
     /**
-     * Perform file creation
+     * Perform file creation.
+     *
+     * @returns the path actually written, which differs from `path` when the
+     *   target was already taken by an unrelated file.
      */
-    private async performCreate(item: AnyIDBZoteroItem, path: string) {
+    private async performCreate(
+        item: AnyIDBZoteroItem,
+        path: string,
+    ): Promise<string> {
         // If file exists but is not our note (collision), create a file with different name
         const notePath = await this.resolveUniquePath(path);
 
@@ -521,6 +531,8 @@ export class LibraryNoteService {
         });
 
         await this.parentHost.writeTextFile(notePath, spliced.content);
+
+        return notePath;
     }
 
     /**

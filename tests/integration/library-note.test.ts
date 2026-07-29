@@ -189,27 +189,27 @@ describe("creating a note", () => {
         expect(host.vault.get("Source/@PARENT01 (3).md")).toBe(rendered);
     });
 
-    /**
-     * Current behaviour, pinned rather than endorsed.
-     *
-     * performCreate resolves the collision and writes to the free path, but
-     * ensureNote returns the path it was *asked* for. Callers therefore get a
-     * path that is not where the note went — openNote opens the colliding file
-     * instead of the note it just created.
-     *
-     * Reachable whenever two items render to the same path: two untitled or
-     * identically-titled items with no citation key both resolve to the same
-     * name under the default template. ensureNotePath, which does the same
-     * collision handling, returns the resolved path correctly.
-     */
-    test("ensureNote returns the requested path, not the one it wrote to", async () => {
+    test("the returned path is the one the note was written to", async () => {
+        // Two items rendering to the same path is ordinary — two untitled or
+        // identically-titled items with no citation key do, under the default
+        // template. Returning the requested path instead of the resolved one
+        // makes openNote open the file that caused the collision.
         await seedArticle();
         host.vault.set("Source/@PARENT01.md", "someone else's note");
 
         const returned = await service.ensureNote(LIB, "PARENT01", {});
 
-        expect(returned).toBe("Source/@PARENT01.md");
-        expect(host.vault.get(returned)).toBe("someone else's note");
+        expect(returned).toBe("Source/@PARENT01 (1).md");
+        expect(host.vault.get(returned)).toBe(rendered);
+    });
+
+    test("openNote opens the note it just created, not the collision", async () => {
+        await seedArticle();
+        host.vault.set("Source/@PARENT01.md", "someone else's note");
+
+        await service.openNote(LIB, "PARENT01");
+
+        expect(host.opened).toEqual(["Source/@PARENT01 (1).md"]);
     });
 
     test("a hundred collisions is treated as a problem, not a hundredth suffix", async () => {
