@@ -77,12 +77,26 @@ export class SyncTask extends BaseTask {
                     // Force content refresh: annotation/note changes do not
                     // bump the parent item's version, so the version-equality
                     // short-circuit in performUpdate would otherwise skip them.
-                    void this.taskManager.createBatchNoteTask(
-                        this.libraryNoteService,
-                        { items: resolved },
-                        { forceUpdateContent: true },
-                        true,
-                    );
+                    //
+                    // The catch is not optional: `void` on a promise attaches
+                    // no rejection handler, so a failure here would escape the
+                    // surrounding try/catch as an unhandled rejection rather
+                    // than being swallowed as intended.
+                    this.taskManager
+                        .createBatchNoteTask(
+                            this.libraryNoteService,
+                            { items: resolved },
+                            { forceUpdateContent: true },
+                            true,
+                        )
+                        .catch((spawnErr) =>
+                            this.log(
+                                "error",
+                                "Failed to spawn the post-sync source-note refresh",
+                                "SyncTask",
+                                spawnErr,
+                            ),
+                        );
                 }
             } catch (e) {
                 // Never let post-sync chaining fail the sync task itself.

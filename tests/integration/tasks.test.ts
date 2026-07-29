@@ -786,11 +786,23 @@ describe("post-sync source-note refresh", () => {
         ).toEqual([]);
     });
 
-    test("a failure while chaining never fails the sync itself", async () => {
+    test("a failure while chaining is logged, never thrown or leaked", async () => {
+        // The spawn is fire-and-forget, so its rejection has to be caught
+        // explicitly: `void promise` attaches no handler and the failure would
+        // escape the surrounding try/catch as an unhandled rejection.
         await seedItem({ libraryID: LIB, key: "PARENT01" });
         const m = new TaskManager(host);
         (m as unknown as { createBatchNoteTask: unknown }).createBatchNoteTask =
             () => Promise.reject(new Error("spawn failed"));
+
+        const logged = new Promise<void>((resolve) => {
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- the fake's methods are closures
+            const original = host.log;
+            host.log = (level, message, context, details) => {
+                original(level, message, context, details);
+                if (/Failed to spawn the post-sync/.test(message)) resolve();
+            };
+        });
 
         const task = new SyncTask(
             host,
@@ -809,6 +821,8 @@ describe("post-sync source-note refresh", () => {
         );
 
         await task.execute(new AbortController().signal);
+        await logged;
+
         expect(task.getInfo().status).toBe("completed");
     });
 });
