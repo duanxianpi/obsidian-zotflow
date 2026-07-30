@@ -168,15 +168,26 @@ export class LocalReaderView extends ItemView {
 
                 // Register event listeners
                 this.bridge.onEventType("error", (evt) => {
-                    console.error(`${evt.code}: ${evt.message}`);
+                    services.logService.error(
+                        `Reader error ${evt.code}: ${evt.message}`,
+                        "LocalReaderView",
+                    );
                 });
 
+                // Sidebar geometry is not persisted yet — see the twin in
+                // `view.ts`. Kept as debug traces so the hook stays visible.
                 this.bridge.onEventType("sidebarToggled", (evt) => {
-                    console.log("Sidebar toggled:", evt.open);
+                    services.logService.debug(
+                        `Sidebar toggled: ${evt.open}`,
+                        "LocalReaderView",
+                    );
                 });
 
                 this.bridge.onEventType("sidebarWidthChanged", (evt) => {
-                    console.log("Sidebar width changed:", evt.width);
+                    services.logService.debug(
+                        `Sidebar width changed: ${evt.width}`,
+                        "LocalReaderView",
+                    );
                 });
 
                 this.bridge.onEventType("openLink", (evt) => {
@@ -299,7 +310,11 @@ export class LocalReaderView extends ItemView {
                 });
             }
         } catch (e: any) {
-            console.error("Error loading Zotero Reader view:", e);
+            services.logService.error(
+                "Error loading Zotero Reader view",
+                "LocalReaderView",
+                e,
+            );
             container.empty();
             const errorMessage = container.createDiv({
                 cls: "error-message",

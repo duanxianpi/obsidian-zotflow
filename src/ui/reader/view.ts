@@ -210,15 +210,28 @@ export class ZoteroReaderView extends ItemView {
 
                 // Register event listeners
                 this.bridge.onEventType("error", (evt) => {
-                    console.error(`${evt.code}: ${evt.message}`);
+                    services.logService.error(
+                        `Reader error ${evt.code}: ${evt.message}`,
+                        "ZoteroReaderView",
+                    );
                 });
 
+                // Sidebar geometry is not persisted yet — `CreateReaderOptions`
+                // has `sidebarOpen`/`sidebarWidth` but nothing writes them to
+                // ViewStateService. Kept as debug traces so the hook stays
+                // visible for whoever wires that up.
                 this.bridge.onEventType("sidebarToggled", (evt) => {
-                    console.log("Sidebar toggled:", evt.open);
+                    services.logService.debug(
+                        `Sidebar toggled: ${evt.open}`,
+                        "ZoteroReaderView",
+                    );
                 });
 
                 this.bridge.onEventType("sidebarWidthChanged", (evt) => {
-                    console.log("Sidebar width changed:", evt.width);
+                    services.logService.debug(
+                        `Sidebar width changed: ${evt.width}`,
+                        "ZoteroReaderView",
+                    );
                 });
 
                 this.bridge.onEventType("openLink", (evt) => {

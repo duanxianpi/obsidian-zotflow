@@ -11,7 +11,7 @@ export interface LogEntry {
     error?: any;
 }
 
-/** In-memory ring-buffer logger (max 1 000 entries) with console mirroring. */
+/** In-memory ring-buffer logger (max 1 000 entries). */
 export class LogService {
     private _logs: LogEntry[] = [];
     private readonly MAX_LOGS = 1000;
