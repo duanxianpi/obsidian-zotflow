@@ -12,8 +12,21 @@
  *   - `-field:value`           → negated filter
  *   - `word` / `"two words"`   → free text (fuzzy-matched)
  *
- * Only whitelisted fields are treated as filters; anything else is folded
- * back into the free-text portion so the query never "loses" characters.
+ * Only whitelisted fields are treated as filters. An unrecognized `field:` is
+ * folded back into the free-text portion with its colon intact, so a term is
+ * never silently reinterpreted as something else.
+ *
+ * Two inputs are deliberately discarded rather than preserved:
+ *
+ *   - **A stray `-` is dropped.** It is only meaningful in front of a
+ *     recognized `field:`; negated free text does not exist, because
+ *     `SearchService` honours `negate` only while evaluating filters and runs a
+ *     single positive fuzzy pass over `free`. So `-word` searches for `word`,
+ *     and a literal leading hyphen is not searchable. The operator hint list
+ *     says as much ("prefix a filter to exclude").
+ *   - **An empty quoted value drops the whole term.** `tag:""` yields no filter
+ *     rather than one that can never match, and a bare `""` yields no token —
+ *     an empty free-text token would widen every highlight regex.
  */
 
 /** A single structured filter such as `collection:AI` or `-tag:draft`. */
