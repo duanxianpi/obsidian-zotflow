@@ -473,10 +473,6 @@ export class LocalReaderView extends ItemView {
                     sourceNotePath,
                 });
             }
-            // Make sure re-saved (existing) annotation IDs are also tracked.
-            for (const annotation of annotations) {
-                this.knownAnnotationIds.add((annotation as AnnotationJSON).id);
-            }
         }
     }
 

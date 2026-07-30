@@ -16,14 +16,6 @@ export interface AutoCopyContext {
 }
 
 /**
- * Returns true when the annotation was just created (not edited).
- */
-export function isNewlyCreated(annotation: AnnotationJSON): boolean {
-    const created = annotation.dateCreated ?? annotation.dateAdded;
-    return !!created && created === annotation.dateModified;
-}
-
-/**
  * Copy an embed link, plain text, or formatted citation to the system clipboard
  * for a freshly-created annotation, based on the `autoCopyAnnotation` setting.
  *
