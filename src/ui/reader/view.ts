@@ -474,6 +474,16 @@ export class ZoteroReaderView extends ItemView {
             primary,
             state as Record<string, unknown>,
         );
+
+        // Keep the bridge's replay cache current. If Obsidian reparents this
+        // panel (split / pop-out) the iframe reloads and the bridge re-inits the
+        // reader from that cache — without this it would jump back to wherever
+        // the file was when it was opened.
+        this.bridge?.updateReaderOpts(
+            primary
+                ? { primaryViewState: state as Record<string, unknown> }
+                : { secondaryViewState: state as Record<string, unknown> },
+        );
     }
 
     /**

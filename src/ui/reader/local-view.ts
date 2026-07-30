@@ -404,6 +404,13 @@ export class LocalReaderView extends ItemView {
             primary,
             state as Record<string, unknown>,
         );
+
+        // Keep the bridge's replay cache current — see the twin in `view.ts`.
+        this.bridge?.updateReaderOpts(
+            primary
+                ? { primaryViewState: state as Record<string, unknown> }
+                : { secondaryViewState: state as Record<string, unknown> },
+        );
     }
 
     /**

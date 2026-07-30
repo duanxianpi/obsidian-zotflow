@@ -60,13 +60,31 @@ export class IframeReaderBridge {
     >();
     private connectTimeoutMs = 8000;
     private readyPromiseResolver: (() => void) | null = null;
-    private readyPromiseRejecter: ((err: Error) => void) | null = null;
 
     private editorList: EmbeddableMarkdownEditor[] = [];
     private rendererList: Component[] = [];
     private _readerOpts: CreateReaderOptions | undefined;
 
     private token: string | null = null;
+
+    /**
+     * Bumped by every `connect()`. A connect whose generation is stale (because
+     * `reconnect()` superseded it) unwinds at its next checkpoint instead of
+     * driving a child that has already been thrown away.
+     */
+    private connectGeneration = 0;
+
+    /**
+     * `load` events seen on the CURRENT iframe element. Obsidian reparents the
+     * DOM when a panel is split or popped out, which reloads the iframe while
+     * the element itself survives — so anything past the first load means the
+     * child realm was replaced under us. Each `connect()` builds a new element,
+     * so this resets naturally and a reconnect's own first load never counts.
+     */
+    private iframeLoadCount = 0;
+
+    /** De-dupes overlapping reconnects (split, then immediately drag out). */
+    private reconnectPromise: Promise<void> | null = null;
 
     constructor(
         private container: HTMLElement,
@@ -375,12 +393,17 @@ export class IframeReaderBridge {
         if (this._state !== "idle" && this._state !== "disposed") return;
         this._state = "connecting";
 
-        const readyPromise = new Promise<void>((resolve, reject) => {
+        const generation = ++this.connectGeneration;
+        /** True once `reconnect()` has started a newer attempt. */
+        const superseded = () => generation !== this.connectGeneration;
+
+        const readyPromise = new Promise<void>((resolve) => {
             this.readyPromiseResolver = resolve;
-            this.readyPromiseRejecter = reject;
         });
 
-        // Create iframe
+        // Create iframe. A fresh element per connect, so `iframeLoadCount`
+        // counts loads of THIS element only.
+        this.iframeLoadCount = 0;
         const doc = this.container.ownerDocument; // Get the document of the container
         this.iframe = doc.createElement("iframe");
         this.iframe.id = "zotero-reader-iframe";
@@ -404,6 +427,8 @@ export class IframeReaderBridge {
         this.iframe.sandbox.add("allow-forms");
 
         this.iframe.onload = () => {
+            this.iframeLoadCount++;
+
             // Apply Obsidian color-scheme classes based on setting
             const scheme = services.settings.readerColorScheme;
             const iframeDoc = this.iframe?.contentDocument;
@@ -438,20 +463,33 @@ export class IframeReaderBridge {
                 }
             }
 
-            // Only handle unexpected reloads when we're in a stable state
-            if (
-                (this._state === "reader-ready" ||
-                    this._state === "bridge-ready") &&
-                this._readerOpts
-            ) {
-                // It was loaded before, but it was loaded again somehow
-                // We need to reconnect but avoid infinite loop
+            // A second load on the same element means Obsidian reparented the
+            // panel (split / pop-out) and the browser replaced the child realm.
+            // The old `child` reference and, crucially, penpal's WindowMessenger
+            // are both bound to a Window that no longer exists — penpal drops
+            // any message whose source is not the exact `remoteWindow` it was
+            // constructed with, so the connection cannot be re-pointed. Tearing
+            // down and rebuilding is the only recovery.
+            //
+            // Counting loads rather than inspecting `_state`/`_readerOpts` makes
+            // this independent of whether the child's handshake happened to beat
+            // the `load` event, and it recovers reloads that land before the
+            // first `initReader` too.
+            if (this.iframeLoadCount > 1 && !superseded()) {
                 services.logService.warn(
                     "Iframe reloaded unexpectedly, triggering reconnection",
                     "IframeReaderBridge",
                 );
-                // Use setTimeout to avoid potential stack overflow
-                setTimeout(() => this.reconnect(), 0);
+                // Deferred so the reconnect never runs inside the load handler.
+                setTimeout(() => {
+                    void this.reconnect().catch((e: unknown) => {
+                        services.logService.error(
+                            "Reconnection after iframe reload failed",
+                            "IframeReaderBridge",
+                            e,
+                        );
+                    });
+                }, 0);
             }
         };
 
@@ -521,6 +559,7 @@ export class IframeReaderBridge {
                 ),
             ),
         ]);
+        if (superseded()) return;
 
         // Wait until the child calls register() (state becomes "ready") or timeout
         await Promise.race([
@@ -532,8 +571,23 @@ export class IframeReaderBridge {
                 ),
             ),
         ]);
+        // `dispose()` resolves the ready promise so a superseded connect unwinds
+        // here immediately, instead of hanging until its timeout rejects.
+        if (superseded()) return;
 
-        if (this._readerOpts) {
+        // Replay the document into the fresh iframe. Only reachable on a
+        // reconnect: on a first connect `_readerOpts` is still unset, because
+        // both views await `connect()` before calling `initReader`.
+        //
+        // The `reader-ready` check covers the other order — if a caller does
+        // call `initReader` while we are still connecting, the bridge-ready
+        // queue has already served it by now, and replaying would load the
+        // document a second time.
+        //
+        // Read through the getter: control-flow analysis still has `_state`
+        // narrowed to the `"connecting"` assigned at the top of this method,
+        // because the mutation happens inside the `register` callback.
+        if (this._readerOpts && this.state !== "reader-ready") {
             // Update annotation json
             let newAnnotationJson: AnnotationJSON[] = [];
 
@@ -546,7 +600,12 @@ export class IframeReaderBridge {
             } else if (this.isLocal && this.localDataManager) {
                 newAnnotationJson = this.localDataManager.getAllAnnotations();
             }
+            if (superseded()) return;
 
+            // `_readerOpts` carries the view state as of the last
+            // `updateReaderOpts()` — the owning view refreshes it on every
+            // `viewStateChanged`, so the reader comes back where the user left
+            // it rather than where the file was first opened.
             const newReaderOpts: CreateReaderOptions = {
                 ...this._readerOpts,
                 annotations: newAnnotationJson,
@@ -554,6 +613,23 @@ export class IframeReaderBridge {
 
             await this.initReader(newReaderOpts);
         }
+    }
+
+    /**
+     * Merge a patch into the cached reader options used to replay the document
+     * after an unexpected iframe reload.
+     *
+     * The views call this from their `viewStateChanged` handler. Without it the
+     * cache keeps the snapshot taken when the file was opened, and a panel split
+     * or pop-out would scroll the reader back to that position.
+     *
+     * A no-op before the first `initReader` — there is nothing to replay yet,
+     * and the view reads the live state from `ViewStateService` in that window
+     * anyway.
+     */
+    updateReaderOpts(patch: Partial<CreateReaderOptions>) {
+        if (!this._readerOpts) return;
+        this._readerOpts = { ...this._readerOpts, ...patch };
     }
 
     private runAfterBridgeReady(fn: () => Promise<void>) {
@@ -623,21 +699,50 @@ export class IframeReaderBridge {
         this.rendererList.forEach((comp) => comp.unload());
         this.rendererList.length = 0;
         this._state = "disposing";
+
+        // Release a `connect()` still waiting on the child to register. It
+        // checks its generation right after and unwinds without touching the
+        // torn-down child; leaving it parked would stall it until its own 8 s
+        // timeout rejected, long after a reconnect had taken over.
+        const releasePendingConnect = this.readyPromiseResolver;
+        this.readyPromiseResolver = null;
+        releasePendingConnect?.();
+
         try {
             if (this.iframe?.contentWindow) {
-                delete (this.iframe.contentWindow as any).__ZREADER_BRIDGE__;
+                delete (this.iframe.contentWindow as any).__OBSIDIAN_BRIDGE__;
             }
         } catch {}
         this.child = undefined;
         this.iframe?.remove();
         this.iframe = null;
+        this.token = null;
+        // Nothing queued can run against a child that no longer exists.
+        this.afterBridgeReadyQueue.length = 0;
+        this.afterReaderReadyQueue.length = 0;
         if (clearListeners) this.typedListeners.clear();
         this._state = "disposed";
     }
 
-    async reconnect() {
-        await this.dispose(false);
-        return this.connect();
+    /**
+     * Rebuild the iframe and the penpal connection from scratch, keeping the
+     * cached reader options so the document is replayed.
+     *
+     * Concurrent callers share one attempt: a split immediately followed by a
+     * drag-out fires two `load` events, and starting two `connect()`s would
+     * leave the first orphaned on a detached iframe.
+     */
+    reconnect(): Promise<void> {
+        if (this.reconnectPromise) return this.reconnectPromise;
+        this.reconnectPromise = (async () => {
+            try {
+                await this.dispose(false);
+                await this.connect();
+            } finally {
+                this.reconnectPromise = null;
+            }
+        })();
+        return this.reconnectPromise;
     }
 
     public get state(): BridgeState {
