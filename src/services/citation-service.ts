@@ -235,9 +235,13 @@ export class CitationService {
     }
 
     /**
-     * Warn the user once per session that their footnote definition template
-     * predates the template-owned marker redesign and should be updated so it
-     * emits its own `[^marker]:` prefix (see release notes).
+     * Warn that the footnote definition template predates the template-owned
+     * marker redesign and should be updated to emit its own `[^marker]:` prefix
+     * (see release notes).
+     *
+     * Fires on every legacy render rather than once per session, deliberately:
+     * each occurrence is a citation that just went into a note with a
+     * prepended marker, so the nudge stays tied to the thing it is about.
      */
     private warnLegacyFootnoteTemplate(): void {
         services.notificationService.notify(
