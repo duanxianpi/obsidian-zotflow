@@ -67,6 +67,8 @@ export default tseslint.config(
             // Build/test tooling runs in Node, never in the plugin bundle.
             "obsidianmd/no-nodejs-modules": "off",
             "obsidianmd/no-global-this": "off",
+            // No popout window — and no `window` at all — in the Node runner.
+            "obsidianmd/prefer-window-timers": "off",
             "no-restricted-globals": "off",
             "@typescript-eslint/no-explicit-any": "off",
             "@typescript-eslint/no-unsafe-any": "off",
