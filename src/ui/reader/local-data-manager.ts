@@ -114,7 +114,6 @@ export class LocalDataManager {
 
         // For local tag suggestions, we add the Obsidian-native tags as well
         const obsidianTags = services.app.metadataCache.getTags();
-        console.log("Obsidian tags:", obsidianTags);
         for (const tag of Object.keys(obsidianTags)) {
             const tagName = tag.replace(/^#/, "").trim();
             if (!tagName) continue;
