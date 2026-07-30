@@ -108,6 +108,8 @@ export class FakeObsidianApp {
     readonly vaultCalls: string[] = [];
     /** Paths sent to the system trash and the local trash, separately. */
     readonly trashed = { system: [] as string[], local: [] as string[] };
+    /** Every `fileManager.generateMarkdownLink` call, in order. */
+    readonly generatedLinks: { path: string; alias?: string }[] = [];
 
     constructor(private options: FakeAppOptions = {}) {}
 
@@ -444,6 +446,26 @@ export class FakeObsidianApp {
                     (f) => f.slice(f.lastIndexOf("/") + 1) === p,
                 );
                 return hit ? this.tfile(hit) : null;
+            },
+        };
+    }
+
+    get fileManager() {
+        return {
+            /**
+             * Obsidian builds either a wikilink or a markdown link depending on
+             * vault settings; the fake always emits the wikilink form, which is
+             * enough to tell "the real API produced this" apart from a caller's
+             * own hardcoded fallback string.
+             */
+            generateMarkdownLink: (
+                file: TFile,
+                _sourcePath: string,
+                _subpath?: string,
+                alias?: string,
+            ) => {
+                this.generatedLinks.push({ path: file.path, alias });
+                return alias ? `[[${file.path}|${alias}]]` : `[[${file.path}]]`;
             },
         };
     }
