@@ -646,17 +646,29 @@ via the Comlink `WorkerBridge`.
 | `QueryService`      | `view.ts` (attachment lookup)      | `getAttachmentItem` (extensible for future `getItem`, etc.)            |
 | `AttachmentService` | `cache-section.ts`                 | `getCacheTotalSizeBytes`, `purgeCache`                                 |
 
-### Schema (version 1)
+### Schema (current version: 5)
 
-| Table         | Key         | Indexes                                                                                                    |
-| ------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `keys`        | `key`       | —                                                                                                          |
-| `groups`      | `id`        | —                                                                                                          |
-| `items`       | `++localID` | `[libraryID+key]`, `[libraryID+parentItem+itemType+trashed]`, `[libraryID+itemType+trashed]`, `syncStatus` |
-| `collections` | `++localID` | `[libraryID+key]`, `[libraryID+parentCollection]`, `libraryID`                                             |
-| `libraries`   | `id`        | —                                                                                                          |
-| `files`       | `++localID` | `[libraryID+key]`, `lastAccessed`                                                                          |
-| `cslCache`    | `key`       | — (v5; string KV cache for CSL styles/locales/index)                                                       |
+Primary keys are the `&`-prefixed declarations in `db/db.ts`, and the `Table<T, K>`
+type parameters mirror them. **There is no `localID` column** — `items`,
+`collections` and `files` are all keyed by the compound `[libraryID+key]`, which
+is why `db.items.get([libraryID, key])` and
+`db.items.update([libraryID, key], …)` are the correct way to address a row.
+
+| Table         | Primary key           | Secondary indexes                                                                                                                                             |
+| ------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `keys`        | `&key`                | —                                                                                                                                                             |
+| `groups`      | `&id`                 | —                                                                                                                                                             |
+| `libraries`   | `&id`                 | —                                                                                                                                                             |
+| `items`       | `&[libraryID+key]`    | `[libraryID+syncStatus]`, `[libraryID+itemType+trashed]`, `[libraryID+parentItem+itemType+trashed]`, `*collections`, `*searchCreators`, `*searchTags`, `dateModified`, `lastAccessedAt` |
+| `collections` | `&[libraryID+key]`    | `[libraryID+trashed]`, `[libraryID+syncStatus]`, `[libraryID+parentCollection]`                                                                                |
+| `files`       | `&[libraryID+key]`    | `md5`, `lastAccessedAt`                                                                                                                                       |
+| `cslCache`    | `&key`                | — (string KV cache for CSL styles/locales/index)                                                                                                               |
+
+Version history: v1 base schema · v2 adds `[libraryID+parentCollection]` to
+`collections` · v3 adds `lastAccessedAt` to `items` · v4 clears `files` (cached
+bytes moved from `Blob` to `ArrayBuffer`) · v5 adds `cslCache`.
+
+`*`-prefixed entries are Dexie multi-valued indexes.
 
 ### Rules
 
