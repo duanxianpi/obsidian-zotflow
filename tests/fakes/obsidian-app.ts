@@ -32,6 +32,9 @@
  *   files you created, the way Obsidian's indexer eventually would.
  * - No events. Nothing fires `vault.on("rename")`; a test that cares about
  *   `main.ts`'s rename plumbing must call the handler itself.
+ * - `vault`/`adapter`/`metadataCache` build a fresh object per access, so
+ *   `vi.spyOn(app.vault, "create")` patches a throwaway and does nothing. Use
+ *   the `failWrites` option (or add a switch) instead of spying.
  */
 import { TFile, TFolder, normalizePath } from "../stubs/obsidian";
 
@@ -77,6 +80,12 @@ export interface FakeAppOptions {
     trashSystemFails?: boolean;
     /** Make `adapter.trashSystem` throw rather than return false. */
     trashSystemThrows?: boolean;
+    /**
+     * Reject every write — `vault.create`/`modify` and `adapter.write` alike.
+     * Models a full disk or a permission failure, so callers that are meant
+     * to log and carry on can be tested without monkey-patching the surface.
+     */
+    failWrites?: boolean;
 }
 
 export class FakeObsidianApp {
@@ -242,6 +251,9 @@ export class FakeObsidianApp {
             write: (path: string, data: string) => {
                 const p = normalizePath(path);
                 this.adapterCalls.push(`write:${p}`);
+                if (this.options.failWrites) {
+                    return Promise.reject(new Error("write failed"));
+                }
                 this.files.set(p, { text: data });
                 return Promise.resolve();
             },
@@ -326,6 +338,9 @@ export class FakeObsidianApp {
             create: (path: string, data: string) => {
                 const p = normalizePath(path);
                 this.vaultCalls.push(`create:${p}`);
+                if (this.options.failWrites) {
+                    return Promise.reject(new Error("write failed"));
+                }
                 this.files.set(p, { text: data });
                 return Promise.resolve(this.tfile(p));
             },
@@ -339,6 +354,9 @@ export class FakeObsidianApp {
 
             modify: (file: TFile, data: string) => {
                 this.vaultCalls.push(`modify:${file.path}`);
+                if (this.options.failWrites) {
+                    return Promise.reject(new Error("write failed"));
+                }
                 this.files.set(file.path, { text: data });
                 return Promise.resolve();
             },
