@@ -29,12 +29,62 @@ export function normalizeCollection(
 }
 
 function extractCitationKey(extra?: string) {
+    // `\S+` rather than `\w+`: Better BibTeX routinely emits keys containing
+    // hyphens and dots (`smith-2020`, `Smith.2020`), and `\w` silently
+    // truncated them at the first one. Whitespace still ends the key, so a
+    // following line of `extra` is never absorbed into it.
+    //
+    // The separator is `[ \t]*`, not `\s*`: `\s` matches newlines, so a bare
+    // `Citation Key:` with an empty value would reach across the line break
+    // and capture the start of the next `extra` line as the key.
     const citationKey = extra?.match(/Citation Key:[ \t]*(\S+)/)?.[1];
     return citationKey;
 }
 
 /** Block-level tags that end a line of rendered text. */
 const NOTE_LINE_BREAKS = /<\/(?:p|div|li|h[1-6]|blockquote|tr)>|<br\s*\/?>/gi;
+
+/** The entities an HTML serializer is obliged to escape, plus `nbsp`. */
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    // Written as an escape so the byte stays visible in review; the
+    // whitespace collapse below folds it into a normal space, which is how
+    // it renders.
+    nbsp: "\u00a0",
+};
+
+/**
+ * Decodes numeric character references and the handful of named entities a
+ * serializer must emit.
+ *
+ * Anything else (`&copy;`, `&mdash;`) is deliberately left alone: Zotero
+ * stores those as literal UTF-8, so carrying the full HTML entity table would
+ * be weight for no benefit. Decoding is single-pass by construction, so
+ * `&amp;lt;` yields `&lt;` rather than `<`.
+ */
+function decodeEntities(text: string): string {
+    return text.replace(
+        /&(#[0-9]+|#x[0-9a-f]+|[a-z]+);/gi,
+        (whole, body: string) => {
+            if (!body.startsWith("#")) {
+                return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
+            }
+            const codePoint =
+                body[1] === "x" || body[1] === "X"
+                    ? Number.parseInt(body.slice(2), 16)
+                    : Number.parseInt(body.slice(1), 10);
+            // NaN fails this comparison too, so a malformed reference is kept
+            // verbatim rather than becoming a replacement character.
+            return codePoint > 0 && codePoint <= 0x10ffff
+                ? String.fromCodePoint(codePoint)
+                : whole;
+        },
+    );
+}
 
 /**
  * Derives a short display title from a Zotero note's HTML body.
@@ -51,11 +101,16 @@ function noteTitle(note: string, key: string): string {
             .replace(/<[^>]+>/g, " ")
             .split("\n")[0] ?? "";
 
+    // Entities are decoded only after the tags are gone, so a decoded `&lt;`
+    // can never be re-read as markup, and only after the line split, so a
+    // numeric newline reference collapses to a space the way it would render
+    // rather than truncating the title.
+    //
     // Stripped tags leave runs of spaces behind; collapse them, and trim
     // before truncating so that leading markup cannot eat the 50-character
     // budget and leave the real title outside it. The second trim covers a
     // cut that lands mid-space.
-    const collapsed = firstLine.replace(/\s+/g, " ").trim();
+    const collapsed = decodeEntities(firstLine).replace(/\s+/g, " ").trim();
     return collapsed.slice(0, 50).trim() || `Note ${key}`;
 }
 

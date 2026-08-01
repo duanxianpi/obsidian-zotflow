@@ -215,6 +215,67 @@ describe("normalizeItem: title", () => {
         expect(out.title).toBe("Note NOTEKEY2");
     });
 
+    test.each([
+        ["&amp;", "Tea &amp; Coffee", "Tea & Coffee"],
+        ["&lt; and &gt;", "a &lt;b&gt; c", "a <b> c"],
+        ["&quot;", "say &quot;hi&quot;", 'say "hi"'],
+        ["&apos;", "it&apos;s", "it's"],
+        ["decimal &#65;", "&#65;lpha", "Alpha"],
+        ["hex &#x41;", "&#x41;lpha", "Alpha"],
+        ["uppercase &#X41;", "&#X41;lpha", "Alpha"],
+        // HTML5 keeps the all-caps spellings as legacy aliases.
+        ["uppercase &AMP;", "Tea &AMP; Coffee", "Tea & Coffee"],
+        ["mixed-case &Quot;", "say &Quot;hi&Quot;", 'say "hi"'],
+    ])("decodes %s in note titles", (_label, body, expected) => {
+        expect(normalizeItem(note({ note: `<p>${body}</p>` }), LIBRARY_ID).title)
+            .toBe(expected);
+    });
+
+    test("&nbsp; is decoded and then folded into a normal space", () => {
+        const out = normalizeItem(
+            note({ note: "<p>Tea&nbsp;&nbsp;Coffee</p>" }),
+            LIBRARY_ID,
+        );
+        expect(out.title).toBe("Tea Coffee");
+    });
+
+    test("decoding is single-pass, so &amp;lt; does not become a tag", () => {
+        const out = normalizeItem(
+            note({ note: "<p>&amp;lt;script&amp;gt;</p>" }),
+            LIBRARY_ID,
+        );
+        expect(out.title).toBe("&lt;script&gt;");
+    });
+
+    test("a decoded &lt;p&gt; is not re-read as markup", () => {
+        const out = normalizeItem(
+            note({ note: "<p>&lt;p&gt;literal&lt;/p&gt;</p>" }),
+            LIBRARY_ID,
+        );
+        expect(out.title).toBe("<p>literal</p>");
+    });
+
+    test.each([
+        ["an unknown named entity", "&copy; 2020", "&copy; 2020"],
+        ["an out-of-range code point", "&#99999999;x", "&#99999999;x"],
+        // Decoding this to a literal NUL would smuggle a control character
+        // into an indexed field.
+        ["a null code point", "&#0;x", "&#0;x"],
+        ["a null hex code point", "&#x0;x", "&#x0;x"],
+        ["a bare ampersand", "AT&T", "AT&T"],
+    ])("leaves %s untouched", (_label, body, expected) => {
+        expect(normalizeItem(note({ note: `<p>${body}</p>` }), LIBRARY_ID).title)
+            .toBe(expected);
+    });
+
+    test("a numeric newline reference collapses instead of truncating", () => {
+        const out = normalizeItem(
+            note({ note: "<p>One&#10;Two</p>" }),
+            LIBRARY_ID,
+        );
+        expect(out.title).toBe("One Two");
+    });
+
     test("annotation gets no title", () => {
         const out = normalizeItem(annotation(), LIBRARY_ID);
         expect(out.title).toBe("");
