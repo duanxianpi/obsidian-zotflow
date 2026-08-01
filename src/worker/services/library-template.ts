@@ -300,8 +300,7 @@ export class LibraryTemplateService {
                 for (let ref of refs) {
                     let p: CiteProps | undefined;
                     if (this.isAnnotationContext(ref)) {
-                        const resolved =
-                            await this.resolveAnnotationCite(ref);
+                        const resolved = await this.resolveAnnotationCite(ref);
                         ref = resolved.ref;
                         p = resolved.props;
                     }
@@ -358,7 +357,10 @@ export class LibraryTemplateService {
                 "This annotation has no parent attachment — nothing to cite",
             );
         }
-        const attachment = await db.items.get([anno.libraryID, anno.parentItem]);
+        const attachment = await db.items.get([
+            anno.libraryID,
+            anno.parentItem,
+        ]);
         if (!attachment) {
             throw new ZotFlowError(
                 ZotFlowErrorCode.RESOURCE_MISSING,
@@ -721,7 +723,8 @@ export class LibraryTemplateService {
             );
         }
         const notePath =
-            await this.notePathService.resolveLibraryNotePath(item);
+            (await this.parentHost.getFileByKey(item.key)) ??
+            (await this.notePathService.resolveLibraryNotePath(item));
         const context = {} as any;
         context.item = await this.mapToItemContext(item);
         context.notePath = notePath;
@@ -986,7 +989,8 @@ export class LibraryTemplateService {
             let notePath: string | undefined;
             try {
                 notePath =
-                    await this.notePathService.resolveLibraryNotePath(hit);
+                    (await this.parentHost.getFileByKey(key)) ??
+                    (await this.notePathService.resolveLibraryNotePath(hit));
             } catch {
                 notePath = undefined;
             }

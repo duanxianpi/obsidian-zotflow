@@ -641,6 +641,56 @@ describe("related items", () => {
         expect(body).toContain(".md");
     });
 
+    test("notePath is the indexed location, not the template's", async () => {
+        // The note was created before its citation key changed, so it still
+        // lives at the old path. Re-rendering the template would point at
+        // `@roe2021`, where no file exists.
+        await seedItem({
+            libraryID: LIB,
+            key: "RELATED1",
+            itemType: "book",
+            title: "The Related Book",
+            citationKey: "roe2021",
+        });
+        host.keyIndex.set("RELATED1", "Source/Moved/@roe.md");
+
+        const item = await seedArticle("PARENT01", {
+            relations: {
+                "dc:relation": "http://zotero.org/users/1/items/RELATED1",
+            },
+        });
+
+        const body = await render(
+            "{% for r in item.relatedItems %}{{ r.notePath }}{% endfor %}",
+            item,
+        );
+        expect(body.trim()).toBe("Source/Moved/@roe.md");
+        expect(body).not.toContain("roe2021");
+    });
+
+    test("notePath falls back to the template when nothing is indexed", async () => {
+        await seedItem({
+            libraryID: LIB,
+            key: "RELATED1",
+            itemType: "book",
+            title: "The Related Book",
+            citationKey: "roe2021",
+        });
+        // No keyIndex entry: the note does not exist yet.
+        const item = await seedArticle("PARENT01", {
+            relations: {
+                "dc:relation": "http://zotero.org/users/1/items/RELATED1",
+            },
+        });
+
+        const body = await render(
+            "{% for r in item.relatedItems %}{{ r.notePath }}{% endfor %}",
+            item,
+        );
+        expect(body).toContain("roe2021");
+        expect(body.trim().endsWith(".md")).toBe(true);
+    });
+
     test("a relation to an item we do not have is reported unresolved", async () => {
         const item = await seedArticle("PARENT01", {
             relations: {
@@ -1194,6 +1244,15 @@ describe("citation templates", () => {
             "{{ notePath }}",
         );
         expect(out).toContain(".md");
+    });
+
+    test("previewCitationTemplate prefers the indexed note path", async () => {
+        host.keyIndex.set("PARENT01", "Source/Moved/@elsewhere.md");
+        const out = await service.previewCitationTemplate(
+            input(),
+            "{{ notePath }}",
+        );
+        expect(out).toBe("Source/Moved/@elsewhere.md");
     });
 
     test("previewCitationTemplate rejects an unknown item", async () => {
