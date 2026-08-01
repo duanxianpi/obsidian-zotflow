@@ -466,6 +466,18 @@
     padding-top: var(--size-4-2);
 }
 
+/* react-arborist >= 3.10.1 puts `min-width: max-content` on every row so that a
+ * row's selection highlight keeps spanning the full width once a tree scrolls
+ * sideways (their #10). This tree is handed an explicit `width={dims.w}` and is
+ * meant to fit its pane, never to scroll sideways — and a max-content row hands
+ * the name span its full natural width, so the span never overflows and its
+ * `text-overflow: ellipsis` has nothing to act on. Long titles then get cut off
+ * flat by the pane edge instead of trailing off in an ellipsis. Their value is
+ * an inline style, so overriding it needs `!important`. */
+.zotflow-tree-view-container [role="treeitem"] {
+    min-width: 0 !important;
+}
+
 .zotflow-node-wrapper {
     display: flex;
     align-items: center;
