@@ -29,8 +29,34 @@ export function normalizeCollection(
 }
 
 function extractCitationKey(extra?: string) {
-    const citationKey = extra?.match(/Citation Key: (\w+)/)?.[1];
+    const citationKey = extra?.match(/Citation Key:[ \t]*(\S+)/)?.[1];
     return citationKey;
+}
+
+/** Block-level tags that end a line of rendered text. */
+const NOTE_LINE_BREAKS = /<\/(?:p|div|li|h[1-6]|blockquote|tr)>|<br\s*\/?>/gi;
+
+/**
+ * Derives a short display title from a Zotero note's HTML body.
+ *
+ * Note bodies rarely contain literal newlines — their line structure lives in
+ * block tags — so those are turned into newlines before the remaining inline
+ * tags are stripped. Without that step "the first line" was the whole note
+ * with its paragraphs run together.
+ */
+function noteTitle(note: string, key: string): string {
+    const firstLine =
+        note
+            .replace(NOTE_LINE_BREAKS, "\n")
+            .replace(/<[^>]+>/g, " ")
+            .split("\n")[0] ?? "";
+
+    // Stripped tags leave runs of spaces behind; collapse them, and trim
+    // before truncating so that leading markup cannot eat the 50-character
+    // budget and leave the real title outside it. The second trim covers a
+    // cut that lands mid-space.
+    const collapsed = firstLine.replace(/\s+/g, " ").trim();
+    return collapsed.slice(0, 50).trim() || `Note ${key}`;
 }
 
 /**
@@ -55,12 +81,7 @@ export function normalizeItem(
     if (raw.data.itemType === "attachment") {
         title = raw.data.filename || raw.data.title || "";
     } else if (raw.data.itemType === "note") {
-        const plainText = raw.data.note
-            ? raw.data.note.replace(/<[^>]+>/g, " ")
-            : "";
-        title =
-            (plainText.split("\n")[0] ?? plainText).slice(0, 50).trim() ||
-            `Note ${raw.data.key}`;
+        title = noteTitle(raw.data.note ?? "", raw.data.key);
     } else if (raw.data.itemType !== "annotation") {
         // Exclude annotation which doesn't have title
         // For other types that might have title
@@ -135,8 +156,24 @@ export function normalizeItem(
     return item;
 }
 
-/** Converts a `Date` or ISO string to Zotero's truncated ISO format (`YYYY-MM-DDTHH:MM:SSZ`). */
+/**
+ * Converts a `Date` or ISO string to Zotero's truncated ISO format
+ * (`YYYY-MM-DDTHH:MM:SSZ`). Omitting the argument means "now".
+ *
+ * Only an omitted argument means now. Previously any falsy input did, so an
+ * empty string quietly became the current timestamp and got written to the
+ * server as if it were a real date — while `"garbage"` threw a bare
+ * `RangeError` from `toISOString`. Both unparseable cases now fail the same
+ * way, with a message naming the input.
+ *
+ * @throws {RangeError} if `dateInput` is given but cannot be parsed.
+ */
 export function toZoteroDate(dateInput?: string | Date): string {
-    const date = dateInput ? new Date(dateInput) : new Date();
+    const date = dateInput === undefined ? new Date() : new Date(dateInput);
+    if (Number.isNaN(date.getTime())) {
+        throw new RangeError(
+            `toZoteroDate: unparseable date ${JSON.stringify(dateInput)}`,
+        );
+    }
     return date.toISOString().split(".")[0] + "Z";
 }
