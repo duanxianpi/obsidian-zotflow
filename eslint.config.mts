@@ -7,6 +7,10 @@ export default tseslint.config(
     globalIgnores([
         "node_modules",
         "dist",
+        // Vitest's v8 reporter output — generated, gitignored, and its vendored
+        // prettify.js/sorter.js belong to no tsconfig, so the type-aware rules
+        // could only ever report them as parse errors.
+        "coverage/**",
         "reader/reader/**",
         "note-editor/note-editor/**",
         "esbuild.config.mjs",
@@ -28,6 +32,13 @@ export default tseslint.config(
                         "eslint.config.mts",
                         "manifest.json",
                         "vitest.config.ts",
+                        // Build/dev tooling. Deliberately outside tsconfig.json,
+                        // which covers only the shipped `src` tree — but they
+                        // are tracked files, so they should still be linted
+                        // rather than silently skipped as parse errors.
+                        "scripts/*.js",
+                        "scripts/*.mjs",
+                        "scripts/*.ts",
                     ],
                 },
                 tsconfigRootDir: import.meta.dirname,
@@ -37,9 +48,52 @@ export default tseslint.config(
     },
     ...obsidianmd.configs.recommended,
     {
+        rules: {
+            // The preset ships this as `fixToUnknown: true`, which makes a bare
+            // `eslint --fix` silently rewrite every `any` in the repo to
+            // `unknown`. ESLint goes quiet and `tsc` breaks — the one outcome
+            // worse than the warning itself. Keep the warning, drop the fixer;
+            // widening an `any` is a judgement call, not a mechanical edit.
+            "@typescript-eslint/no-explicit-any": [
+                "warn",
+                { fixToUnknown: false },
+            ],
+            // Obsidian's store guideline on UI capitalisation. Not a code-health
+            // signal, and it can only be satisfied by editing user-visible
+            // strings, so it drowns out the rules that do point at defects.
+            "obsidianmd/ui/sentence-case": "off",
+        },
+    },
+    {
+        // TypeScript resolves identifiers itself, and does it with the ambient
+        // declarations in `src/types` in scope. `no-undef` has neither, so on
+        // `.d.ts` and `.tsx` it reports things like `Scope` and the `react-jsx`
+        // runtime's `React` as undefined. Every hit is a false positive.
+        files: ["**/*.{ts,tsx,mts,cts}"],
+        rules: {
+            "no-undef": "off",
+        },
+    },
+    {
         files: ["**/*.{js,jsx,mjs,cjs}"],
         rules: {
             "obsidianmd/no-plugin-as-component": "off",
+        },
+    },
+    {
+        // Build/dev tooling, same carve-out as `tests/` below: these run under
+        // Node on a developer's machine and never reach the mobile bundle, so
+        // the rules that exist to keep that bundle portable do not apply.
+        files: ["scripts/**"],
+        languageOptions: {
+            globals: {
+                ...globals.node,
+            },
+        },
+        rules: {
+            "obsidianmd/no-nodejs-modules": "off",
+            "obsidianmd/rule-custom-message": "off",
+            "no-restricted-globals": "off",
         },
     },
     {

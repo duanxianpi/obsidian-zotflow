@@ -1,0 +1,15 @@
+# Paths that are already ESLint-clean and must stay that way.
+#
+# `npm run lint:clean` runs ESLint over exactly these paths with
+# `--max-warnings 0`, and it runs as part of `npm test`. The rest of the repo
+# still has a backlog, so a plain `eslint .` cannot be a gate yet — this list
+# is the ratchet: once a file is cleaned up, add it here and it can never
+# silently regress.
+#
+# One path per line so each cleanup lands as a one-line diff. Blank lines and
+# `#` comments are ignored.
+
+scripts
+src/worker/convert
+src/worker/services/convert.ts
+src/utils/note-meta.ts
