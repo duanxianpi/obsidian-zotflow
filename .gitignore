@@ -29,3 +29,9 @@ tests/.csl-fixtures/
 
 # vitest coverage reports
 coverage/
+
+# Full-repo lint output. A scratch snapshot of the backlog, regenerated on
+# demand with `npx eslint .` — it goes stale the moment a rule or a plugin
+# version moves, so it is not worth versioning. The lint that actually gates
+# is `lint:convert`, which runs at --max-warnings 0.
+lint.txt
