@@ -13,3 +13,5 @@ scripts
 src/worker/convert
 src/worker/services/convert.ts
 src/utils/note-meta.ts
+src/utils/error.ts
+src/services/log-service.ts

@@ -8,7 +8,7 @@ export interface LogEntry {
     level: LogLevel;
     message: string;
     context?: string;
-    error?: any;
+    error?: unknown;
 }
 
 /** In-memory ring-buffer logger (max 1 000 entries). */
@@ -20,9 +20,9 @@ export class LogService {
         return this._logs;
     }
 
-    public debug(message: string, context?: string, details?: any) {
+    public debug(message: string, context?: string, details?: unknown) {
         const prefix = this.getPrefix(context);
-        const args = [prefix, message];
+        const args: unknown[] = [prefix, message];
         if (details) args.push(details);
 
         // console.debug(...args);
@@ -30,9 +30,9 @@ export class LogService {
         this.addEntry("debug", message, context, details);
     }
 
-    public info(message: string, context?: string, details?: any) {
+    public info(message: string, context?: string, details?: unknown) {
         const prefix = this.getPrefix(context);
-        const args = [prefix, message];
+        const args: unknown[] = [prefix, message];
         if (details) args.push(details);
 
         // console.log(...args);
@@ -40,9 +40,9 @@ export class LogService {
         this.addEntry("info", message, context, details);
     }
 
-    public warn(message: string, context?: string, details?: any) {
+    public warn(message: string, context?: string, details?: unknown) {
         const prefix = this.getPrefix(context);
-        const args = [prefix, message];
+        const args: unknown[] = [prefix, message];
         if (details) args.push(details);
 
         // console.warn(...args);
@@ -50,9 +50,9 @@ export class LogService {
         this.addEntry("warn", message, context, details);
     }
 
-    public error(message: string, context?: string, error?: any) {
+    public error(message: string, context?: string, error?: unknown) {
         const prefix = this.getPrefix(context);
-        const args = [prefix, message];
+        const args: unknown[] = [prefix, message];
         if (error) args.push(error);
 
         console.error(...args);
@@ -64,7 +64,7 @@ export class LogService {
         level: LogLevel,
         message: string,
         context?: string,
-        details?: any,
+        details?: unknown,
     ) {
         switch (level) {
             case "debug":
@@ -94,7 +94,7 @@ export class LogService {
         level: LogLevel,
         message: string,
         context?: string,
-        error?: any,
+        error?: unknown,
     ) {
         const entry: LogEntry = {
             id: crypto.randomUUID(),
