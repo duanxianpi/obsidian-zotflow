@@ -36,7 +36,7 @@ function isMathElement(node: Element): "inline" | "display" | null {
 function toZoteroMath(node: Element, kind: "inline" | "display"): void {
     const delim = kind === "display" ? "$$" : "$";
     node.tagName = kind === "display" ? "pre" : "span";
-    node.properties = { className: "math" };
+    node.properties = { className: ["math"] };
     node.children = [
         { type: "text", value: delim + toText(node) + delim },
     ];
@@ -121,7 +121,7 @@ export const mathFeature: SyntaxFeature = {
                 parent?.type === "element" &&
                 parent.tagName === "pre"
             ) {
-                parent.properties = { className: "math" };
+                parent.properties = { className: ["math"] };
                 parent.children = [
                     { type: "text", value: "$$" + toText(node) + "$$" },
                 ];
