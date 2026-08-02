@@ -15,3 +15,5 @@ src/worker/services/convert.ts
 src/utils/note-meta.ts
 src/utils/error.ts
 src/services/log-service.ts
+src/db/normalize.ts
+src/db/annotation.ts

@@ -5,7 +5,11 @@ import type {
     AttachmentData,
     ZoteroItemDataTypeMap,
 } from "types/zotero-item";
-import type { AnnotationJSON } from "types/zotero-reader";
+import type {
+    AnnotationJSON,
+    AnnotationType,
+    ZoteroPosition,
+} from "types/zotero-reader";
 
 /**
  * Convert reader-compatible annotation JSON into a Zotero annotation item.
@@ -16,26 +20,24 @@ import type { AnnotationJSON } from "types/zotero-reader";
 export function annotationItemFromJSON(
     json: AnnotationJSON,
 ): Partial<ZoteroItemDataTypeMap["annotation"]> {
-    const item: any = {
+    return {
         itemType: "annotation",
+        key: json.id,
+        annotationType: json.type,
+        annotationAuthorName: json.authorName || "",
+        ...(json.type === "highlight" || json.type === "underline"
+            ? { annotationText: json.text }
+            : {}),
+        annotationComment: json.comment,
+        annotationColor: json.color,
+        annotationPageLabel: json.pageLabel,
+        annotationSortIndex: json.sortIndex,
+        annotationIsExternal: json.isExternal,
+        // The copy is what turns an absent position into `{}` rather than
+        // letting `JSON.stringify` return `undefined`.
+        annotationPosition: JSON.stringify(Object.assign({}, json.position)),
+        tags: (json.tags || []).map((t) => ({ tag: t.name })),
     };
-
-    item.key = json.id;
-    item.annotationType = json.type;
-    item.annotationAuthorName = json.authorName || "";
-    if (json.type === "highlight" || json.type === "underline") {
-        item.annotationText = json.text;
-    }
-    item.annotationComment = json.comment;
-    item.annotationColor = json.color;
-    item.annotationPageLabel = json.pageLabel;
-    item.annotationSortIndex = json.sortIndex;
-    item.annotationIsExternal = json.isExternal;
-
-    item.annotationPosition = JSON.stringify(Object.assign({}, json.position));
-    item.tags = (json.tags || []).map((t) => ({ tag: t.name }));
-
-    return item;
 }
 
 /**
@@ -73,9 +75,6 @@ export async function getAnnotationJson(
     // lastModifiedByUser is not readily available in standard Zotero item API response
     // We will assume it's createdByUser if not present.
 
-    // Tag Colors from Settings
-    const tagColors = new Map();
-
     // Zotero Annotations
     let annotations = (await db.items
         .where({
@@ -92,61 +91,21 @@ export async function getAnnotationJson(
     // External Annotations
     const annotationJson: AnnotationJSON[] = [];
     for (const annotation of annotations) {
-        const o: any = {};
-        o.libraryID = annotation.libraryID;
-        o.parentItem = item.key;
-        o.id = annotation.key;
-        o.type = annotation.raw.data.annotationType;
-        o.isExternal = annotation.raw.data.annotationIsExternal || false; // Default to false
+        const data = annotation.raw.data;
+        const createdByUser = annotation.raw.meta.createdByUser;
+        const type = data.annotationType as AnnotationType;
+        const isExternal = data.annotationIsExternal || false; // Default to false
 
         const isAuthor =
-            !annotation.raw.meta.createdByUser?.id ||
-            annotation.raw.meta.createdByUser?.id === currentUser?.id;
-        const isReadOnly = false; // Defaulting to false
+            !createdByUser?.id || createdByUser?.id === currentUser?.id;
 
-        if (annotation.raw.data.annotationAuthorName) {
-            o.authorName = annotation.raw.data.annotationAuthorName;
-            if (isGroup) {
-                // Not sure what is lastModifiedByUser
-            }
-        } else if (
-            !o.isExternal &&
-            isGroup &&
-            annotation.raw.meta.createdByUser
-        ) {
-            o.authorName =
-                annotation.raw.meta.createdByUser.username ||
-                annotation.raw.meta.createdByUser.name;
-            o.isAuthorNameAuthoritative = true;
-        }
-
-        o.readOnly = isReadOnly || o.isExternal || !isAuthor;
-
-        if (o.type === "highlight" || o.type === "underline") {
-            o.text = annotation.raw.data.annotationText;
-        }
-
-        o.comment = annotation.raw.data.annotationComment;
-        o.pageLabel = annotation.raw.data.annotationPageLabel;
-        o.color = annotation.raw.data.annotationColor;
-        o.sortIndex = annotation.raw.data.annotationSortIndex;
-        o.position = JSON.parse(annotation.raw.data.annotationPosition);
-
-        // Add tags
-        const tags = annotation.raw.data.tags || [];
-
-        const processedTags = tags.map((t) => {
-            const obj: any = {
-                name: t.tag,
-            };
-            /*
-                if (tagColors.has(t.tag)) {
-                    obj.color = tagColors.get(t.tag).color;
-                    obj.position = tagColors.get(t.tag).position;
-                }
-                */
-            return obj;
-        });
+        // Colours are not wired up yet, so every tag sorts by name today. The
+        // shape mirrors Zotero's `toJSONSync` — including its unreachable
+        // second branch — so tag colours can be dropped in without redesigning
+        // the comparator.
+        const processedTags: AnnotationJSON["tags"] = (data.tags || []).map(
+            (t) => ({ name: t.tag }),
+        );
 
         processedTags.sort((a, b) => {
             if (!a.color && !b.color) {
@@ -160,15 +119,39 @@ export async function getAnnotationJson(
             if (!a.color && b.color) {
                 return 1;
             }
-            return a.position - b.position;
+            return (a.position ?? 0) - (b.position ?? 0);
         });
 
         processedTags.forEach((t) => delete t.position);
-        o.tags = processedTags;
 
-        o.dateAdded = annotation.dateAdded;
-        o.dateCreated = annotation.dateAdded;
-        o.dateModified = annotation.dateModified;
+        const o: AnnotationJSON = {
+            libraryID: annotation.libraryID,
+            parentItem: item.key,
+            id: annotation.key,
+            type,
+            isExternal,
+            readOnly: isExternal || !isAuthor,
+            ...(type === "highlight" || type === "underline"
+                ? { text: data.annotationText }
+                : {}),
+            comment: data.annotationComment,
+            pageLabel: data.annotationPageLabel,
+            color: data.annotationColor,
+            sortIndex: data.annotationSortIndex,
+            position: JSON.parse(data.annotationPosition) as ZoteroPosition,
+            tags: processedTags,
+            dateAdded: annotation.dateAdded,
+            dateCreated: annotation.dateAdded,
+            dateModified: annotation.dateModified,
+        };
+
+        if (data.annotationAuthorName) {
+            o.authorName = data.annotationAuthorName;
+        } else if (!isExternal && isGroup && createdByUser) {
+            o.authorName = createdByUser.username || createdByUser.name;
+            o.isAuthorNameAuthoritative = true;
+        }
+
         annotationJson.push(o);
     }
 
