@@ -151,7 +151,7 @@ export class LibraryNoteService {
 
         // Clear old timer
         if (this.debouncers.has(debounceId)) {
-            clearTimeout(this.debouncers.get(debounceId)!);
+            clearTimeout(this.debouncers.get(debounceId));
             this.debouncers.delete(debounceId);
         }
 
@@ -171,7 +171,7 @@ export class LibraryNoteService {
         }
 
         // Mode B: Debounced execution (2 seconds delay)
-        const timer = setTimeout(async () => {
+        const run = async () => {
             this.debouncers.delete(debounceId);
             try {
                 await this.ensureNote(libraryID, key, options);
@@ -184,7 +184,10 @@ export class LibraryNoteService {
                     e,
                 );
             }
-        }, DEBOUNCE_DELAY);
+        };
+        // The body handles its own failures, so the promise is deliberately
+        // not awaited by the timer.
+        const timer = setTimeout(() => void run(), DEBOUNCE_DELAY);
 
         this.debouncers.set(debounceId, timer);
     }
@@ -439,7 +442,7 @@ export class LibraryNoteService {
         const stub = [
             "---",
             "zotflow-locked: true",
-            `zotero-key: \"${key}\"`,
+            `zotero-key: "${key}"`,
             "item-version: 0",
             `library-id: ${libraryID}`,
             "---",
@@ -545,8 +548,14 @@ export class LibraryNoteService {
         forceUpdateImages: boolean,
     ) {
         // Read Frontmatter version from file
+        const rawVersion = fileCheck.frontmatter?.["item-version"];
+        // Only ever compared against a numeric string, so anything that is not
+        // a scalar counts as "no version" and forces the update — which is
+        // what a missing or mangled value should do anyway.
         const currentVersion =
-            fileCheck.frontmatter?.["item-version"]?.toString();
+            typeof rawVersion === "number" || typeof rawVersion === "string"
+                ? String(rawVersion)
+                : undefined;
         const newVersion = item.version.toString();
 
         // Only update if versions are different, or if forced update is specified
@@ -637,7 +646,7 @@ export class LibraryNoteService {
         let attachments: IDBZoteroItem<AttachmentData>[];
 
         if (item.itemType === "attachment") {
-            attachments = [item as IDBZoteroItem<AttachmentData>];
+            attachments = [item];
         } else {
             attachments = (await db.items
                 .where({

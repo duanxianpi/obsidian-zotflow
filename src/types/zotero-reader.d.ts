@@ -138,7 +138,8 @@ export interface AnnotationJSON {
     parentItem?: string;
     id: string;
     type: AnnotationType;
-    image?: Uint8Array;
+    /** A `data:image/png;base64,...` URI, split and decoded by saveBase64Image. */
+    image?: string;
     isExternal?: boolean;
     authorName?: string;
     isAuthorNameAuthoritative?: boolean;

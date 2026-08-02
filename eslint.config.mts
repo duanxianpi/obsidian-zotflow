@@ -81,6 +81,19 @@ export default tseslint.config(
         },
     },
     {
+        // `src/worker` is bundled and started as a real Web Worker
+        // (`new Worker(...)` in bridge/index.ts), so `window` does not exist
+        // there at all. Both of these rules are about main-thread popout
+        // windows, and `prefer-window-timers` autofixes to `window.setTimeout`
+        // — applying it here would leave lint clean and break the worker at
+        // runtime with a ReferenceError.
+        files: ["src/worker/**"],
+        rules: {
+            "obsidianmd/prefer-window-timers": "off",
+            "obsidianmd/no-global-this": "off",
+        },
+    },
+    {
         // Build/dev tooling, same carve-out as `tests/` below: these run under
         // Node on a developer's machine and never reach the mobile bundle, so
         // the rules that exist to keep that bundle portable do not apply.

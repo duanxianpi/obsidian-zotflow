@@ -35,8 +35,6 @@ import type {
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
 import type { AnnotationJSON } from "types/zotero-reader";
-import type { SaveAnnotationsResult } from "./services/annotation";
-import type { LibraryRow } from "./services/key";
 import type { DbHelperService as DbHelperServiceType } from "./services/db-helper";
 import type { TagService as TagServiceType } from "./services/tag";
 
@@ -159,7 +157,13 @@ const exposedApi: WorkerAPI = {
         blobUrls: Record<string, string>,
     ) => {
         // Patch global fetch to proxy through Obsidian Main Thread
-        (globalThis as any).originalFetch = (globalThis as any).fetch;
+        // The worker global has no `originalFetch`; we are adding it so the
+        // proxy can be unwound.
+        const workerGlobal = globalThis as unknown as {
+            fetch: unknown;
+            originalFetch?: unknown;
+        };
+        workerGlobal.originalFetch = workerGlobal.fetch;
         const proxiedFetchImpl = async (url: string, init?: RequestInit) => {
             try {
                 const response = await parentHost.request({
@@ -193,7 +197,7 @@ const exposedApi: WorkerAPI = {
                 );
             }
         };
-        (globalThis as any).fetch = proxiedFetchImpl;
+        workerGlobal.fetch = proxiedFetchImpl;
 
         // Also expose via module import (see proxied-fetch.ts) so worker
         // code can use it without referencing lint-restricted globals.
@@ -511,8 +515,8 @@ const exposedApi: WorkerAPI = {
         return _taskManager!.createSyncTask(
             _sync!,
             libraryId,
-            _libraryNote!,
-            _currentSettings!,
+            _libraryNote,
+            _currentSettings,
         );
     },
 

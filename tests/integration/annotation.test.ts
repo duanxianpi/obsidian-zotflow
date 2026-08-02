@@ -531,7 +531,7 @@ describe("saveAnnotations: create", () => {
             await h.service.saveAnnotations(attachment, h.keyInfo, [
                 makeAnnotationJson("VISUAL01", {
                     type,
-                    image: "data:image/png;base64,AAAA" as any,
+                    image: "data:image/png;base64,AAAA",
                 }),
             ]);
 
@@ -545,7 +545,7 @@ describe("saveAnnotations: create", () => {
         const attachment = await h.seedAttachment("ATTACH01");
 
         await h.service.saveAnnotations(attachment, h.keyInfo, [
-            makeAnnotationJson("ANNO0001", { image: "data:x" as any }),
+            makeAnnotationJson("ANNO0001", { image: "data:x" }),
         ]);
 
         expect(h.noteService.savedImages).toEqual([]);
@@ -556,7 +556,7 @@ describe("saveAnnotations: create", () => {
         h.noteService.failSaveImage = true;
 
         const result = await h.service.saveAnnotations(attachment, h.keyInfo, [
-            makeAnnotationJson("VISUAL01", { type: "image", image: "x" as any }),
+            makeAnnotationJson("VISUAL01", { type: "image", image: "x" }),
         ]);
 
         // The annotation itself must still be recorded.

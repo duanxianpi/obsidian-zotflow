@@ -219,7 +219,7 @@ describe("stripAnnotationForPayload", () => {
         // The payload crosses dataTransfer and the clipboard; a base64 image or
         // a full rect list would bloat or break the transfer.
         const stripped = stripAnnotationForPayload(
-            annotation({ image: new Uint8Array([1, 2, 3]) }),
+            annotation({ image: "data:image/png;base64,AAAA" }),
         );
 
         expect("image" in stripped).toBe(false);

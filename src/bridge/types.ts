@@ -38,7 +38,7 @@ export interface IParentProxy {
     checkFile(path: string): Promise<{
         exists: boolean;
         path: string;
-        frontmatter?: Record<string, any>;
+        frontmatter?: Record<string, unknown>;
     }>;
     deleteFile(path: string): Promise<void>;
     readExternalBinaryFile(absolutePath: string): Promise<ArrayBuffer>;

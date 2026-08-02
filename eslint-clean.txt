@@ -20,3 +20,9 @@ src/db/annotation.ts
 src/worker/services/liquid-support.ts
 src/worker/services/library-template.ts
 src/worker/services/local-template.ts
+src/worker/services/annotation.ts
+src/worker/services/library-note.ts
+src/worker/services/local-note.ts
+src/worker/services/item-note.ts
+src/worker/services/zotero.ts
+src/worker/worker.ts
