@@ -12,7 +12,11 @@
  * default — a service quietly depending on `readExternalBinaryFile` should
  * fail loudly, not read `undefined`.
  */
-import type { IParentProxy, IRequestResponse } from "bridge/types";
+import type {
+    IParentProxy,
+    IRequestResponse,
+    VaultConfig,
+} from "bridge/types";
 import type { LogLevel } from "services/log-service";
 import type { NotificationType } from "services/notification-service";
 import type { ITaskInfo } from "types/tasks";
@@ -76,7 +80,7 @@ export interface FakeParentHostOptions {
     /** Value returned by `isAndroidApp()`. Defaults to false. */
     isAndroid?: boolean;
     /** Value returned by `getVaultConfig()`. Defaults to `{}`. */
-    vaultConfig?: Record<string, unknown>;
+    vaultConfig?: VaultConfig;
     /** Handler for `request()`. Unset means any HTTP call throws. */
     request?: (url: unknown) => Promise<IRequestResponse>;
 }
@@ -234,7 +238,8 @@ export function createFakeParentHost(
         // Utils
         getVaultConfig: async () => options.vaultConfig ?? {},
         parseYaml: async (text) => parseFlatYaml(text),
-        stringifyYaml: async (obj) => stringifyFlatYaml(obj),
+        stringifyYaml: async (obj) =>
+            stringifyFlatYaml(obj as Record<string, unknown>),
         joinPath: async (...segments) =>
             segments
                 .filter((s) => s !== "" && s !== undefined && s !== null)

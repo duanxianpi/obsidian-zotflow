@@ -13,6 +13,11 @@ export interface IRequestResponse {
 }
 
 /** Contract for all operations the worker can invoke on the main thread. */
+/** The subset of Obsidian's undocumented vault config ZotFlow reads. */
+export interface VaultConfig {
+    strictLineBreaks?: boolean;
+}
+
 export interface IParentProxy {
     notify(type: NotificationType, message: string): void;
     log(
@@ -44,9 +49,9 @@ export interface IParentProxy {
     indexFile(path: string): Promise<void>;
 
     // Utils
-    getVaultConfig(): Promise<Record<string, any>>;
-    parseYaml(text: string): Promise<any>;
-    stringifyYaml(obj: any): Promise<string>;
+    getVaultConfig(): Promise<VaultConfig>;
+    parseYaml(text: string): Promise<Record<string, unknown>>;
+    stringifyYaml(obj: unknown): Promise<string>;
     joinPath(...segments: string[]): Promise<string>;
     getLinkedLocalSourceNote(
         file: TFileWithoutParentAndVault,

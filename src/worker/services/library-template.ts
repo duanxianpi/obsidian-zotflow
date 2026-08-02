@@ -35,6 +35,11 @@ import type {
     RenderOptions,
 } from "worker/csl";
 import { extractYear } from "utils/date";
+import {
+    renderLiquid,
+    zfEnv,
+    type LiquidFilterScope,
+} from "./liquid-support";
 
 const DEFAULT_ITEM_TEMPLATE = `---
 citationKey: {{ item.citationKey | json }}
@@ -137,31 +142,6 @@ const CSL_OUTPUT_FORMATS = new Set([
 ]);
 
 /**
- * Per-render values `prepareItemContext` stashes on the Liquid environment.
- * Both are optional because the citation and preview render paths do not
- * populate them.
- */
-interface ZfEnvironments {
-    __zfZoteroLibPrefix?: string;
-    __zfReadOnlyKeys?: Set<string>;
-}
-
-/**
- * LiquidJS's filter `this`, kept deliberately wide. Its own `FilterImpl` is
- * not exported from the package root, and `this` is contravariant — declaring
- * `environments` as `ZfEnvironments` here makes the handler unassignable to
- * `FilterHandler`, whose `environments` is the engine's broad `Scope`.
- */
-interface LiquidFilterScope {
-    context?: { environments?: unknown };
-}
-
-/** Reads this render's stashed values off the filter scope. */
-function zfEnv(scope: LiquidFilterScope): ZfEnvironments {
-    return scope?.context?.environments ?? {};
-}
-
-/**
  * An unchecked read-view over `ZoteroItemData`, not a shape any item actually
  * has. Each field is declared on only some members of the union — a book has
  * no `publicationTitle`, an attachment has none of them — so every one is
@@ -191,6 +171,21 @@ interface OptionalItemFields {
     }>;
 }
 
+/** Root scope handed to Liquid when rendering a source note. */
+interface ItemRenderContext {
+    item: ItemTemplateContext;
+    settings: ZotFlowSettings;
+    __zfReadOnlyKeys: Set<string>;
+    __zfZoteroLibPrefix: string;
+}
+
+/** Root scope handed to Liquid when rendering a citation. */
+interface CitationRenderContext {
+    item: ItemTemplateContext;
+    notePath: string;
+    annotations?: AnnotationTemplateContext[];
+}
+
 /** Identity fields the link filters need; every template context supplies them. */
 interface LinkableItem {
     key: string;
@@ -212,6 +207,11 @@ export class LibraryTemplateService {
         private zotero: ZoteroAPIService,
     ) {
         this.initialize();
+    }
+
+    /** `Liquid.parseAndRender` is typed `any`; every template here is text. */
+    private async render(template: string, scope: object): Promise<string> {
+        return renderLiquid(this.engine, template, scope);
     }
 
     initialize() {
@@ -604,7 +604,7 @@ export class LibraryTemplateService {
     async renderLibrarySourceNote(
         item: AnyIDBZoteroItem,
         templateContent: string | null,
-        originalFrontmatter: Record<string, any> = {},
+        originalFrontmatter: Record<string, unknown> = {},
     ): Promise<string> {
         try {
             const context = await this.prepareItemContext(item);
@@ -625,12 +625,12 @@ export class LibraryTemplateService {
             }
 
             // Parse Template Frontmatter
-            let templateFrontmatter: any = {};
+            let templateFrontmatter: Record<string, unknown> = {};
             if (templateFrontmatterRaw.trim()) {
                 try {
                     // Render the frontmatter raw string first (as it may contain liquid tags)
                     const renderedFrontmatterRaw =
-                        await this.engine.parseAndRender(
+                        await this.render(
                             templateFrontmatterRaw,
                             context,
                         );
@@ -639,7 +639,7 @@ export class LibraryTemplateService {
                     templateFrontmatter = await this.parentHost.parseYaml(
                         renderedFrontmatterRaw,
                     );
-                } catch (e) {
+                } catch {
                     // We don't throw here, just proceed with empty frontmatter from template
                     this.parentHost.log(
                         "error",
@@ -655,7 +655,7 @@ export class LibraryTemplateService {
             //   bare `key`          => overwrite (default; refreshed each
             //                          update from the rendered template)
             // The `??` prefix is stripped from the final key.
-            const finalFrontmatter: Record<string, any> = {
+            const finalFrontmatter: Record<string, unknown> = {
                 ...originalFrontmatter,
             };
             for (const [rawKey, value] of Object.entries(
@@ -684,10 +684,7 @@ export class LibraryTemplateService {
                 await this.parentHost.stringifyYaml(finalFrontmatter);
 
             // Render Body
-            const renderedBody = await this.engine.parseAndRender(
-                body,
-                context,
-            );
+            const renderedBody = await this.render(body, context);
 
             return `---\n${frontmatterString}---\n${renderedBody}`;
         } catch (e) {
@@ -771,16 +768,17 @@ export class LibraryTemplateService {
             );
         }
 
-        const context = {} as any;
-        context.item = await this.mapToItemContext(item);
-        context.notePath = notePath;
+        const context: CitationRenderContext = {
+            item: await this.mapToItemContext(item),
+            notePath,
+        };
         if (input.annotations?.length) {
             context.annotations = input.annotations.map((a) =>
                 this.mapToAnnotationContext(a),
             );
         }
 
-        return this.engine.parseAndRender(template, context);
+        return this.render(template, context);
     }
 
     /** Preview a citation template for a library item (no file creation). */
@@ -799,15 +797,16 @@ export class LibraryTemplateService {
         const notePath =
             (await this.parentHost.getFileByKey(item.key)) ??
             (await this.notePathService.resolveLibraryNotePath(item));
-        const context = {} as any;
-        context.item = await this.mapToItemContext(item);
-        context.notePath = notePath;
+        const context: CitationRenderContext = {
+            item: await this.mapToItemContext(item),
+            notePath,
+        };
         if (input.annotations?.length) {
             context.annotations = input.annotations.map((a) =>
                 this.mapToAnnotationContext(a),
             );
         }
-        return this.engine.parseAndRender(template, context);
+        return this.render(template, context);
     }
 
     /** Return the current citation template from settings. */
@@ -834,7 +833,9 @@ export class LibraryTemplateService {
             : this.settings.citationFootnoteTemplate.trim();
     }
 
-    private async prepareItemContext(item: AnyIDBZoteroItem): Promise<any> {
+    private async prepareItemContext(
+        item: AnyIDBZoteroItem,
+    ): Promise<ItemRenderContext> {
         const itemContext = await this.mapToItemContext(item);
 
         // Build a Set of `${type}:${key}` for regions that must NOT be wrapped
@@ -906,7 +907,7 @@ export class LibraryTemplateService {
 
         const annotations = (
             await getAnnotationJson(
-                item as any,
+                item,
                 this.settings.zoteroapikey,
                 (item) => item.syncStatus !== "deleted",
             )
@@ -1002,7 +1003,7 @@ export class LibraryTemplateService {
         parentItem?: string,
     ): AnnotationTemplateContext {
         return {
-            key: annotation.id!,
+            key: annotation.id,
             libraryID: annotation.libraryID!,
             // Citation-template inputs carry the attachment key on the
             // AnnotationJSON itself (restored by the payload builders).
@@ -1032,11 +1033,9 @@ export class LibraryTemplateService {
     }
 
     private async mapToRelatedItems(
-        data: any,
+        data: { relations?: { [k: string]: string | string[] } },
     ): Promise<RelatedItemTemplateContext[]> {
-        const rels = data?.relations as
-            | { [k: string]: string | string[] }
-            | undefined;
+        const rels = data?.relations;
         if (!rels) return [];
 
         const dc = rels["dc:relation"];

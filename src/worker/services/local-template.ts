@@ -7,6 +7,11 @@ import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 import { getLocalSidecarPath } from "utils/utils";
 import { annoHtml2md } from "worker/convert";
 import type { AnnotationTemplateContext } from "types/template-context";
+import {
+    renderLiquid,
+    zfEnv,
+    type LiquidFilterScope,
+} from "./liquid-support";
 
 /** Default LiquidJS template string for local vault file source notes. */
 const DEFAULT_LOCAL_NOTE_TEMPLATE = `---
@@ -30,7 +35,7 @@ zotflow-local-attachment: [[{{ path }}]]
 > {{ annotation.comment | wrap_editable: "ANNO", annotation.key | replace: newline, quote_string }}
 {%- if annotation.tags and annotation.tags.length > 0 -%}
 >
-> {% for t in annotation.tags %}#{{ t.tag | replace: " ", "\_" }}{% unless forloop.last %} {% endunless %}{% endfor %}
+> {% for t in annotation.tags %}#{{ t.tag | replace: " ", "_" }}{% unless forloop.last %} {% endunless %}{% endfor %}
 {%- endif -%}
 ^{{ annotation.key }}
 
@@ -39,6 +44,19 @@ zotflow-local-attachment: [[{{ path }}]]
 `;
 
 /** LiquidJS template engine for rendering local vault file (PDF/EPUB) source notes. */
+/** Root scope handed to Liquid when rendering a local-file sidecar note. */
+interface LocalRenderContext {
+    item: {
+        name: string;
+        path: string;
+        extension: string;
+        basename: string;
+        annotations: AnnotationTemplateContext[];
+    };
+    settings: ZotFlowSettings;
+    __zfReadOnlyKeys: Set<string>;
+}
+
 export class LocalTemplateService {
     private engine: Liquid;
 
@@ -74,10 +92,14 @@ export class LocalTemplateService {
              * `__zfReadOnlyKeys` set so read-only annotations (external,
              * extracted from the PDF itself) render as plain locked text.
              */
-            function (this: any, input: string, type: string, key: string) {
+            function (
+                this: LiquidFilterScope,
+                input: string,
+                type: string,
+                key: string,
+            ) {
                 if (!type || !key) return input;
-                const readOnlyKeys: Set<string> | undefined =
-                    this?.context?.environments?.__zfReadOnlyKeys;
+                const readOnlyKeys = zfEnv(this).__zfReadOnlyKeys;
                 if (readOnlyKeys && readOnlyKeys.has(`${type}:${key}`)) {
                     return input;
                 }
@@ -102,7 +124,7 @@ export class LocalTemplateService {
         localAttachment: TFileWithoutParentAndVault,
         annotations: AnnotationJSON[],
         templateContent: string | null,
-        originalFrontmatter: Record<string, any> = {},
+        originalFrontmatter: Record<string, unknown> = {},
     ): Promise<string> {
         try {
             const context = await this.prepareLocalAttachmentContext(
@@ -125,12 +147,13 @@ export class LocalTemplateService {
             }
 
             // Parse Template Frontmatter
-            let templateFrontmatter: any = {};
+            let templateFrontmatter: Record<string, unknown> = {};
             if (templateFrontmatterRaw.trim()) {
                 try {
                     // Render the frontmatter raw string first (allow liquid tags in frontmatter)
                     const renderedFrontmatterRaw =
-                        await this.engine.parseAndRender(
+                        await renderLiquid(
+                            this.engine,
                             templateFrontmatterRaw,
                             context,
                         );
@@ -152,7 +175,7 @@ export class LocalTemplateService {
 
             // Merge Frontmatter (Original + Rendered Template)
             // Template keys overwrite Original keys
-            const finalFrontmatter = {
+            const finalFrontmatter: Record<string, unknown> = {
                 ...originalFrontmatter,
                 ...templateFrontmatter,
             };
@@ -167,7 +190,8 @@ export class LocalTemplateService {
                 await this.parentHost.stringifyYaml(finalFrontmatter);
 
             // Render Body
-            const renderedBody = await this.engine.parseAndRender(
+            const renderedBody = await renderLiquid(
+                this.engine,
                 body,
                 context,
             );
@@ -186,7 +210,7 @@ export class LocalTemplateService {
     public async prepareLocalAttachmentContext(
         localAttachment: TFileWithoutParentAndVault,
         annotations: AnnotationJSON[],
-    ): Promise<any> {
+    ): Promise<LocalRenderContext> {
         const processedAnnotations: AnnotationTemplateContext[] = annotations
             .sort((a, b) =>
                 (a.sortIndex ?? "").localeCompare(b.sortIndex ?? ""),

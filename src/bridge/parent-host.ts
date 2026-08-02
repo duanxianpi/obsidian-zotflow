@@ -18,6 +18,7 @@ import {
     deleteFile,
     getLinkedLocalSourceNote,
 } from "utils/file";
+import type { VaultConfig } from "bridge/types";
 import { services } from "services/services";
 
 import type { IParentProxy, IRequestResponse } from "./types";
@@ -154,16 +155,17 @@ export class ParentHost implements IParentProxy {
         return path.join(...segments) as string;
     }
 
-    public async getVaultConfig(): Promise<Record<string, any>> {
+    public async getVaultConfig(): Promise<VaultConfig> {
         // @ts-expect-error vault.config is undocumented Obsidian API
         return { ...this.app.vault.config };
     }
 
-    public async parseYaml(text: string): Promise<any> {
-        return parseYaml(text);
+    public async parseYaml(text: string): Promise<Record<string, unknown>> {
+        // Obsidian types this `any`; frontmatter is always a mapping.
+        return parseYaml(text) as Record<string, unknown>;
     }
 
-    public async stringifyYaml(obj: any): Promise<string> {
+    public async stringifyYaml(obj: unknown): Promise<string> {
         return stringifyYaml(obj);
     }
 

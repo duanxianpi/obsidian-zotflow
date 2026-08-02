@@ -17,3 +17,6 @@ src/utils/error.ts
 src/services/log-service.ts
 src/db/normalize.ts
 src/db/annotation.ts
+src/worker/services/liquid-support.ts
+src/worker/services/library-template.ts
+src/worker/services/local-template.ts

@@ -1,8 +1,7 @@
 import { db } from "db/db";
-import type { IDBZoteroItem } from "types/db-schema";
+import type { AnyIDBZoteroItem, IDBZoteroItem } from "types/db-schema";
 import type {
     AnnotationData,
-    AttachmentData,
     ZoteroItemDataTypeMap,
 } from "types/zotero-item";
 import type {
@@ -48,7 +47,9 @@ export function annotationItemFromJSON(
  * @returns A promise that resolves to an array of annotation items.
  */
 export async function getAnnotationJson(
-    item: IDBZoteroItem<AttachmentData>,
+    // Any item type: the guard below returns [] for non-attachments, which is
+    // the whole reason callers pass items they have not narrowed yet.
+    item: AnyIDBZoteroItem,
     apiKey: string,
     filter?: (annotation: IDBZoteroItem<AnnotationData>) => boolean,
 ): Promise<AnnotationJSON[]> {

@@ -73,7 +73,7 @@ export class AnnotationService {
         const results: AnnotationJSON[] = [];
         for (const child of children) {
             const annots = await getAnnotationJson(
-                child as IDBZoteroItem<AttachmentData>,
+                child,
                 apiKey,
                 (item) => item.syncStatus !== "deleted",
             );
