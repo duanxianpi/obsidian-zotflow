@@ -500,6 +500,56 @@ describe("item context", () => {
         );
     });
 
+    test("every bibliographic field reaches the template", async () => {
+        // These are only ever read by user templates, so nothing else in the
+        // suite notices if one stops being mapped. One test covers them all
+        // rather than eighteen near-identical ones.
+        const fields: Record<string, string> = {
+            date: "2020-05-04",
+            accessDate: "2021-02-03",
+            publisher: "Test House",
+            place: "Vienna",
+            volume: "12",
+            issue: "3",
+            pages: "45-67",
+            series: "Studies in Testing",
+            seriesNumber: "IV",
+            edition: "2nd",
+            url: "https://example.org/paper",
+            ISBN: "978-3-16-148410-0",
+            ISSN: "1234-5678",
+        };
+
+        const item = await seedArticle("PARENT01", fields);
+        const body = await render(
+            Object.keys(fields)
+                .map((k) => `${k}=[{{ item.${k} }}]`)
+                .join("\n"),
+            item,
+        );
+
+        for (const [key, value] of Object.entries(fields)) {
+            expect(body).toContain(`${key}=[${value}]`);
+        }
+    });
+
+    test("tags reach the template", async () => {
+        const item = await seedArticle("PARENT01", {
+            tags: [{ tag: "alpha" }, { tag: "beta" }],
+        });
+        const body = await render(
+            "{% for t in item.tags %}{{ t.tag }};{% endfor %}",
+            item,
+        );
+        expect(body.trim()).toBe("alpha;beta;");
+    });
+
+    test("an item with no tags exposes an empty list", async () => {
+        const item = await seedArticle("PARENT01", { tags: undefined });
+        const body = await render("[{{ item.tags.size }}]", item);
+        expect(body.trim()).toBe("[0]");
+    });
+
     test("creators come from first/last name pairs", async () => {
         expect(await render("{{ item.creators[0].name }}")).toContain("Jane Doe");
     });

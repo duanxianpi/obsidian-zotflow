@@ -31,7 +31,8 @@ export interface ItemTemplateContext {
     dateAdded: string;
     dateModified: string;
 
-    accessDate?: string;
+    /** Null rather than absent when the item has none, matching `date`. */
+    accessDate?: string | null;
     abstractNote?: string;
     publicationTitle?: string;
     publisher?: string;
