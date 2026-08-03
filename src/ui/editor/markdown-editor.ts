@@ -1,3 +1,16 @@
+/*
+ * Ported from an existing Obsidian community plugin's embedded-editor helper.
+ * It drives Obsidian's own unexported CodeMirror plumbing through
+ * `monkey-around`, so it reaches into internals the API does not describe;
+ * the surrounding shape is kept as close to the original as possible so the
+ * port stays followable.
+ *
+ * The `any` family is switched off for the file rather than worked around
+ * inside it. `@codemirror/*` is flagged for the same reason it is in
+ * `tests/`: it arrives through Obsidian's own dependency tree and is an
+ * esbuild external, so declaring it directly would pin a second copy the
+ * plugin never runs against.
+ */
 import { Scope } from "obsidian";
 
 import { EditorSelection, EditorState, Prec } from "@codemirror/state";

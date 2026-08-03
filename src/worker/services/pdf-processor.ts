@@ -1,3 +1,14 @@
+/*
+ * Ported from Zotero's `chrome/content/zotero/xpcom/pdfWorker/manager.js`
+ * (AGPL-3.0). The transport protocol, the request/response bookkeeping and the
+ * queue semantics are kept structurally identical to upstream so the port can
+ * be followed forward when Zotero changes; the message payloads it exchanges
+ * with the worker are untyped JSON on both sides.
+ *
+ * Typing that boundary would mean diverging from the shape being tracked, for
+ * no runtime benefit, so the `any` family is switched off for the file rather
+ * than worked around inside it.
+ */
 import * as Comlink from "comlink";
 import { db } from "db/db";
 import type { ZotFlowSettings } from "settings/types";

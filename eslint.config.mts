@@ -81,6 +81,45 @@ export default tseslint.config(
         },
     },
     {
+        // Two ported files. pdf-processor.ts follows Zotero's own pdfWorker
+        // manager; markdown-editor.ts follows a community plugin's embedded
+        // editor and drives Obsidian's unexported CodeMirror plumbing. Both are
+        // kept structurally close to their upstreams so the ports stay
+        // followable, and both talk to boundaries that are untyped on the other
+        // side. Typing them would mean diverging from the shape being tracked
+        // for no runtime benefit.
+        //
+        // Declared here rather than as inline directives on purpose:
+        // `eslint-comments/no-restricted-disable` deliberately forbids
+        // suppressing `no-explicit-any` and the obsidianmd rules from inside a
+        // file, so an exception belongs somewhere reviewable.
+        files: [
+            "src/worker/services/pdf-processor.ts",
+            "src/ui/editor/markdown-editor.ts",
+        ],
+        rules: {
+            "@typescript-eslint/no-explicit-any": "off",
+            "@typescript-eslint/no-unsafe-assignment": "off",
+            "@typescript-eslint/no-unsafe-member-access": "off",
+            "@typescript-eslint/no-unsafe-call": "off",
+            "@typescript-eslint/no-unsafe-return": "off",
+            "@typescript-eslint/no-unsafe-argument": "off",
+            "@typescript-eslint/no-unnecessary-type-assertion": "off",
+            "@typescript-eslint/no-this-alias": "off",
+            "obsidianmd/no-tfile-tfolder-cast": "off",
+        },
+    },
+    {
+        // `@codemirror/state` and `@codemirror/view` reach these files through
+        // Obsidian's own dependency tree and are esbuild externals at build
+        // time — the same reason the `tests/` block below gives. Declaring them
+        // directly would pin a second copy the plugin never runs against.
+        files: ["src/ui/editor/**", "src/ui/reader/**", "src/types/**"],
+        rules: {
+            "import/no-extraneous-dependencies": "off",
+        },
+    },
+    {
         // `src/worker` is bundled and started as a real Web Worker
         // (`new Worker(...)` in bridge/index.ts), so `window` does not exist
         // there at all. Both of these rules are about main-thread popout
