@@ -26,3 +26,4 @@ src/worker/services/local-note.ts
 src/worker/services/item-note.ts
 src/worker/services/zotero.ts
 src/worker/worker.ts
+src/worker/services/sync.ts

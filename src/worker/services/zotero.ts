@@ -1,18 +1,8 @@
 import api from "zotero-api-client";
-import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import { errorStatus, ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
 import type { ZoteroGroup, ZoteroKey } from "types/zotero";
 import type { ApiChain } from "zotero-api-client";
-
-/**
- * HTTP status off an error thrown by zotero-api-client, which types its
- * rejections as `any`. Zero when the failure carried no response at all
- * (a network error rather than an HTTP one).
- */
-function responseStatus(e: unknown): number {
-    const response = (e as { response?: { status?: number } })?.response;
-    return response ? (response.status ?? 0) : 0;
-}
 
 type ApiFactory = typeof api;
 
@@ -57,7 +47,7 @@ export class ZoteroAPIService {
                 .get();
             return response.getData() as ZoteroKey;
         } catch (e) {
-            const status = responseStatus(e);
+            const status = errorStatus(e);
 
             if (status === 403 || status === 401) {
                 throw new ZotFlowError(
@@ -96,7 +86,7 @@ export class ZoteroAPIService {
                 .get();
             return response.getData() as ZoteroGroup[];
         } catch (e) {
-            const status = responseStatus(e);
+            const status = errorStatus(e);
             if (status === 403 || status === 401) {
                 throw new ZotFlowError(
                     ZotFlowErrorCode.AUTH_INVALID,

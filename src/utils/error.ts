@@ -31,6 +31,18 @@ export function errorMessage(error: unknown): string {
 }
 
 /**
+ * HTTP status carried by a rejection from the Zotero API client, which types
+ * its errors as `any`. Falls back to a top-level `code`, then to 0 — callers
+ * compare against specific statuses (401/403/412), so a non-numeric transport
+ * code has to read as "no HTTP status" rather than match one.
+ */
+export function errorStatus(error: unknown): number {
+    const e = error as { response?: { status?: unknown }; code?: unknown };
+    const status = e?.response?.status ?? e?.code;
+    return typeof status === "number" ? status : 0;
+}
+
+/**
  * Structured detail attached to an error. Every call site passes an object
  * literal — `{ api_key }`, `{ cause, path }` — and `wrap` spreads it, so this
  * is deliberately an object type rather than `unknown`.

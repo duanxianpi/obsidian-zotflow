@@ -41,7 +41,7 @@ export interface IDBZoteroCollection {
     // Sync State
     syncStatus: "synced" | "created" | "updated" | "deleted" | "conflict";
     syncedAt: string;
-    syncError: string;
+    syncError?: string;
 
     // Raw Payload
     raw: ZoteroCollection;
@@ -78,7 +78,7 @@ interface _IDBZoteroItem<T extends ZoteroItemData> {
         | "deleted"
         | "ignore"
         | "conflict";
-    syncError: string;
+    syncError?: string;
     syncedAt: string;
 
     // External Annotation Extraction Tracking
