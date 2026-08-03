@@ -60,7 +60,8 @@ export class TaskManager {
         this.activeControllers.set(task.id, controller);
 
         // Run without awaiting (fire and forget from manager perspective)
-        task.execute(controller.signal).finally(() => {
+        // Fire and forget by design; the task layer records its own outcome.
+        void task.execute(controller.signal).finally(() => {
             this.activeControllers.delete(task.id);
         });
 
@@ -117,7 +118,8 @@ export class TaskManager {
         const controller = new AbortController();
         this.activeControllers.set(task.id, controller);
 
-        task.execute(controller.signal).finally(() => {
+        // Fire and forget by design; the task layer records its own outcome.
+        void task.execute(controller.signal).finally(() => {
             this.activeControllers.delete(task.id);
             this.activeSyncs.delete(scope);
         });

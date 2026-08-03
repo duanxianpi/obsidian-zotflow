@@ -50,7 +50,7 @@ export async function openAttachment(
             },
         });
 
-        app.workspace.revealLeaf(activeLeaf);
+        void app.workspace.revealLeaf(activeLeaf);
     }
 
     if (navigationInfo) {
@@ -70,13 +70,13 @@ export async function openSourceNote(file: TFile, app: App): Promise<void> {
         const view = leaf.view;
         if (view instanceof MarkdownView && view.file?.path === file.path) {
             app.workspace.setActiveLeaf(leaf);
-            app.workspace.revealLeaf(leaf);
+            void app.workspace.revealLeaf(leaf);
             return;
         }
     }
     const leaf = app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    app.workspace.revealLeaf(leaf);
+    void app.workspace.revealLeaf(leaf);
 }
 
 /**
@@ -146,13 +146,13 @@ async function openSourceNoteView(
         const view = leaf.view;
         if (view instanceof MarkdownView && view.file?.path === file.path) {
             app.workspace.setActiveLeaf(leaf);
-            app.workspace.revealLeaf(leaf);
+            void app.workspace.revealLeaf(leaf);
             return view;
         }
     }
     const leaf = app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    app.workspace.revealLeaf(leaf);
+    void app.workspace.revealLeaf(leaf);
     return leaf.view instanceof MarkdownView ? leaf.view : null;
 }
 
@@ -203,6 +203,6 @@ export async function openItemNoteInEditor(
             active: true,
             state: { libraryID, noteKey },
         });
-        app.workspace.revealLeaf(activeLeaf);
+        void app.workspace.revealLeaf(activeLeaf);
     }
 }

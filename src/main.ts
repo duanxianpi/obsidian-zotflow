@@ -57,10 +57,13 @@ import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "ui/note-editor/view";
 import { ZotFlowCommentExtension } from "ui/editor/zotflow-comment-extension";
 import { ZotFlowRegionDecorationExtension } from "ui/editor/zotflow-region-decoration-extension";
 import { CitationSuggest } from "ui/editor/citation-suggest";
+import { fireAndForgetIn } from "utils/fire-and-forget";
 
 const SUPPORTED_EXTENSIONS = ["pdf", "epub", "html"];
 
 /** Plugin entry point managing lifecycle, commands, views, settings, and protocol handlers. */
+const ff = fireAndForgetIn("ZotFlow");
+
 export default class ZotFlow extends Plugin {
     settings: ZotFlowSettings;
     viewStates: Record<string, ViewStateEntry>;
@@ -116,8 +119,8 @@ export default class ZotFlow extends Plugin {
         );
 
         // Add tree view to left
-        this.app.workspace.onLayoutReady(async () => {
-            this.registerTreeView();
+        this.app.workspace.onLayoutReady(() => {
+            ff(this.registerTreeView(), "Failed to register the tree view");
         });
 
         // this.registerEvent(
@@ -187,9 +190,11 @@ export default class ZotFlow extends Plugin {
             }
         }
 
-        // Ensure MathJax is loaded
+        // Ensure MathJax is loaded. The output is thrown away — this only
+        // exists to make Obsidian load the library — so a failure means the
+        // warm-up did not happen and nothing more.
         const tempComponent = new Component();
-        MarkdownRenderer.render(
+        void MarkdownRenderer.render(
             this.app,
             "$\\int$",
             document.createElement("div"),
@@ -210,7 +215,10 @@ export default class ZotFlow extends Plugin {
             id: "open-tree-view",
             name: "Open Zotero Tree View",
             callback: () => {
-                this.registerTreeView(true);
+                ff(
+                    this.registerTreeView(true),
+                    "Failed to register the tree view",
+                );
             },
         });
 
@@ -530,7 +538,7 @@ export default class ZotFlow extends Plugin {
             }
         }
 
-        if (leaf && active) workspace.revealLeaf(leaf);
+        if (leaf && active) void workspace.revealLeaf(leaf);
     }
 
     async loadSettings() {
@@ -1096,13 +1104,13 @@ export default class ZotFlow extends Plugin {
             );
         if (existing) {
             this.app.workspace.setActiveLeaf(existing);
-            this.app.workspace.revealLeaf(existing);
+            void this.app.workspace.revealLeaf(existing);
             return;
         }
 
         const leaf = this.app.workspace.getLeaf("tab");
         await leaf.openFile(dest);
-        this.app.workspace.revealLeaf(leaf);
+        void this.app.workspace.revealLeaf(leaf);
     }
 
     async handleFileOpen(file: TFile | null) {
@@ -1130,9 +1138,12 @@ export default class ZotFlow extends Plugin {
                         },
                     };
 
-                    setTimeout(async () => {
+                    setTimeout(() => {
                         if (leaf.view instanceof MarkdownView) {
-                            await leaf.setViewState(newState);
+                            ff(
+                                leaf.setViewState(newState),
+                                "Failed to restore the note view state",
+                            );
                         }
                     }, 10);
                 }

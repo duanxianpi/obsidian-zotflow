@@ -17,6 +17,9 @@ import { services } from "services/services";
 
 import type { TreeTransferPayload } from "worker/services/tree-view";
 import type { CollectionSortOrder, ItemSortOrder } from "settings/types";
+import { fireAndForgetIn } from "utils/fire-and-forget";
+
+const ff = fireAndForgetIn("TreeView");
 
 /* ================================================================ */
 /*  Types                                                          */
@@ -293,7 +296,7 @@ export const ZotFlowTree = () => {
             }
         };
 
-        loadTree();
+        void loadTree();
     }, []);
 
     // Debounced worker-side fuzzy search. Results (matched entity keys +
@@ -353,13 +356,17 @@ export const ZotFlowTree = () => {
             }
         };
         const unsub1 =
-            services.taskMonitor.noteChangedByEditor.subscribe(refreshHandler);
+            services.taskMonitor.noteChangedByEditor.subscribe(
+                () => void refreshHandler(),
+            );
         const unsub2 =
             services.taskMonitor.noteChangedByNoteView.subscribe(
-                refreshHandler,
+                () => void refreshHandler(),
             );
         const unsub3 =
-            services.taskMonitor.treeChanged.subscribe(refreshHandler);
+            services.taskMonitor.treeChanged.subscribe(
+                () => void refreshHandler(),
+            );
         return () => {
             unsub1();
             unsub2();
@@ -398,7 +405,7 @@ export const ZotFlowTree = () => {
                         .onClick(() => {
                             setCollectionSort(opt.value);
                             services.settings.treeCollectionSort = opt.value;
-                            services.saveSettings();
+                            ff(services.saveSettings(), "Failed to save settings");
                         }),
                 );
             }
@@ -412,7 +419,7 @@ export const ZotFlowTree = () => {
                         .onClick(() => {
                             setItemSort(opt.value);
                             services.settings.treeItemSort = opt.value;
-                            services.saveSettings();
+                            ff(services.saveSettings(), "Failed to save settings");
                         }),
                 );
             }
@@ -492,7 +499,7 @@ export const ZotFlowTree = () => {
                 <div
                     className="clickable-icon"
                     aria-label="Refresh Tree"
-                    onClick={handleRefresh}
+                    onClick={() => void handleRefresh()}
                 >
                     <ObsidianIcon icon="rotate-cw" />
                 </div>

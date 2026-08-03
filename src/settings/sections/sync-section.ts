@@ -40,58 +40,60 @@ export class SyncSection {
             descDiv.createSpan({ text: "." });
         }
         // API Key Input
-        settingGroup.addSetting(async (setting) => {
-            setting
-                .setName("API Key")
-                .setDesc(apiDescContainer)
-                .addText((text) => {
-                    text.setPlaceholder("Enter API Key")
-                        .setValue(this.plugin.settings.zoteroapikey)
-                        .onChange(async (value) => {
-                            this.plugin.settings.zoteroapikey = value.trim();
-                        });
+        settingGroup.addSetting((setting) => {
+            void (async () => {
+                setting
+                    .setName("API Key")
+                    .setDesc(apiDescContainer)
+                    .addText((text) => {
+                        text.setPlaceholder("Enter API Key")
+                            .setValue(this.plugin.settings.zoteroapikey)
+                            .onChange(async (value) => {
+                                this.plugin.settings.zoteroapikey = value.trim();
+                            });
 
-                    if (keyInfo) {
-                        text.setDisabled(true);
-                        text.inputEl.type = "password";
-                    } else {
-                        text.inputEl.type = "text";
-                    }
-                    text.inputEl.size = 30;
+                        if (keyInfo) {
+                            text.setDisabled(true);
+                            text.inputEl.type = "password";
+                        } else {
+                            text.inputEl.type = "text";
+                        }
+                        text.inputEl.size = 30;
+                    });
+
+                // Verify Button
+                setting.addButton((button) => {
+                    button
+                        .setButtonText(keyInfo ? "Verified" : "Verify Key")
+                        .setCta()
+                        .setDisabled(!!keyInfo)
+                        .onClick(() =>
+                            this.handleVerifyOrRefresh(button, "verify"),
+                        );
+                    button.buttonEl.setCssStyles({ width: "100px" });
                 });
 
-            // Verify Button
-            setting.addButton((button) => {
-                button
-                    .setButtonText(keyInfo ? "Verified" : "Verify Key")
-                    .setCta()
-                    .setDisabled(!!keyInfo)
-                    .onClick(() =>
-                        this.handleVerifyOrRefresh(button, "verify"),
-                    );
-                button.buttonEl.setCssStyles({ width: "100px" });
-            });
+                // Clear Button
+                setting.addExtraButton((btn) => {
+                    btn.setIcon("trash")
+                        .setTooltip("Disconnect & Clear Key")
+                        .onClick(async () => {
+                            const oldKey = this.plugin.settings.zoteroapikey;
+                            this.plugin.settings.zoteroapikey = "";
+                            this.plugin.settings.librariesConfig = {};
+                            if (oldKey) await workerBridge.key.deleteKey(oldKey);
 
-            // Clear Button
-            setting.addExtraButton((btn) => {
-                btn.setIcon("trash")
-                    .setTooltip("Disconnect & Clear Key")
-                    .onClick(async () => {
-                        const oldKey = this.plugin.settings.zoteroapikey;
-                        this.plugin.settings.zoteroapikey = "";
-                        this.plugin.settings.librariesConfig = {};
-                        if (oldKey) await workerBridge.key.deleteKey(oldKey);
+                            await this.plugin.saveSettings();
 
-                        await this.plugin.saveSettings();
-
-                        services.notificationService.notify(
-                            "info",
-                            "Disconnected.",
-                        );
-                        this.refreshUI();
-                    });
-                btn.extraSettingsEl.addClass("zotflow-settings-danger-btn");
-            });
+                            services.notificationService.notify(
+                                "info",
+                                "Disconnected.",
+                            );
+                            this.refreshUI();
+                        });
+                    btn.extraSettingsEl.addClass("zotflow-settings-danger-btn");
+                });
+            })();
         });
 
         // Auto-update source notes after sync
@@ -136,11 +138,13 @@ export class SyncSection {
 
         // Libraries Table
         if (keyInfo) {
-            settingGroup.addSetting(async (setting) => {
-                setting.setName("Library Synchronization");
-                setting.setDesc("Manage the sync settings for each library.");
-                await this.renderLibrariesTable(setting.infoEl);
-            });
+            settingGroup.addSetting((setting) => {
+            void (async () => {
+                    setting.setName("Library Synchronization");
+                    setting.setDesc("Manage the sync settings for each library.");
+                    await this.renderLibrariesTable(setting.infoEl);
+            })();
+        });
         }
     }
 
@@ -237,10 +241,10 @@ export class SyncSection {
             });
 
             select.value = this.plugin.settings.librariesConfig[lib.id]!.mode;
-            select.addEventListener("change", async () => {
+            select.addEventListener("change", () => {
                 this.plugin.settings.librariesConfig[lib.id]!.mode =
                     select.value as LibrarySyncMode;
-                await this.plugin.saveSettings();
+                void this.plugin.saveSettings();
             });
         });
 

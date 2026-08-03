@@ -19,6 +19,7 @@ import type {
 } from "types/zotero-reader";
 import type { ITaskInfo } from "types/tasks";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import { fireAndForgetIn } from "utils/fire-and-forget";
 
 /** View type identifier for the Zotero cloud reader view. */
 export const ZOTERO_READER_VIEW_TYPE = "zotflow-zotero-reader-view";
@@ -29,6 +30,8 @@ interface ReaderViewState extends Record<string, unknown> {
 }
 
 /** Obsidian `ItemView` that embeds the Zotero reader iframe for remote/cloud attachments. */
+const ff = fireAndForgetIn("ZoteroReaderView");
+
 export class ZoteroReaderView extends ItemView {
     private attachmentItem: IDBZoteroItem<AttachmentData>;
     private keyInfo: IDBZoteroKey;
@@ -148,10 +151,10 @@ export class ZoteroReaderView extends ItemView {
                         this.attachmentItem.raw.data.title ??
                         "Zotero Reader",
                 );
-            this.loadDocument();
+            ff(this.loadDocument(), "Failed to load document");
         }
 
-        super.setState(state, result);
+        return super.setState(state, result);
     }
 
     private async loadDocument() {
@@ -182,7 +185,7 @@ export class ZoteroReaderView extends ItemView {
                 );
             });
 
-        this.renderReader();
+        ff(this.renderReader(), "Failed to render the reader");
     }
 
     private async renderReader() {
@@ -239,11 +242,17 @@ export class ZoteroReaderView extends ItemView {
                 });
 
                 this.bridge.onEventType("annotationsSaved", (evt) => {
-                    this.handleAnnotationsSaved(evt.annotations);
+                    ff(
+                        this.handleAnnotationsSaved(evt.annotations),
+                        "Failed to apply saved annotations",
+                    );
                 });
 
                 this.bridge.onEventType("annotationsDeleted", (evt) => {
-                    this.handleAnnotationsDeleted(evt.ids);
+                    ff(
+                        this.handleAnnotationsDeleted(evt.ids),
+                        "Failed to apply deleted annotations",
+                    );
                 });
 
                 this.bridge.onEventType("viewStateChanged", (evt) => {
@@ -290,7 +299,12 @@ export class ZoteroReaderView extends ItemView {
                                     newColorScheme &&
                                     newColorScheme !== this.colorScheme
                                 ) {
-                                    this.bridge!.setColorScheme(newColorScheme);
+                                    ff(
+                                        this.bridge!.setColorScheme(
+                                            newColorScheme,
+                                        ),
+                                        "Failed to set the reader colour scheme",
+                                    );
                                     this.colorScheme = newColorScheme;
                                 }
                             }
@@ -415,22 +429,28 @@ export class ZoteroReaderView extends ItemView {
                 const fileBuf = await fileBlob.arrayBuffer();
                 this.fileBlobMD5 = SparkMD5.ArrayBuffer.hash(fileBuf);
 
-                this.bridge.initReader({
-                    data: {
-                        buf: new Uint8Array(fileBuf),
-                        url: null,
-                    },
-                    type: type,
-                    authorName,
-                    ...opts,
-                });
+                ff(
+                    this.bridge.initReader({
+                        data: {
+                            buf: new Uint8Array(fileBuf),
+                            url: null,
+                        },
+                        type: type,
+                        authorName,
+                        ...opts,
+                    }),
+                    "Failed to initialise the reader",
+                );
 
                 // Subscribe to sync events for live annotation updates
                 this.subscribeToSyncEvents();
                 this.subscribeToAnnotationChanges();
 
                 // Extract external annotations
-                this.extractExternalAnnotation();
+                ff(
+                    this.extractExternalAnnotation(),
+                    "Failed to extract external annotations",
+                );
             }
         } catch (e: any) {
             services.logService.error(
@@ -452,7 +472,10 @@ export class ZoteroReaderView extends ItemView {
     readerNavigate(navigationInfo: any) {
         if (!this.bridge) return;
 
-        this.bridge.navigate(navigationInfo);
+        ff(
+            this.bridge.navigate(navigationInfo),
+            "Failed to navigate the reader",
+        );
     }
 
     getState(): ReaderViewState {
@@ -541,19 +564,22 @@ export class ZoteroReaderView extends ItemView {
 
                     // Refresh the attachment item from IDB to pick up
                     // any metadata changes from sync (e.g. MD5, filename).
-                    this.refreshAttachmentItem().then(() => {
-                        // Refresh annotations from IDB without reconnecting
-                        this.refreshAnnotationsFromDB().catch((e) => {
-                            services.logService.error(
+                    ff(
+                        this.refreshAttachmentItem().then(() => {
+                            // Refresh annotations from IDB without reconnecting
+                            ff(
+                                this.refreshAnnotationsFromDB(),
                                 "Failed to refresh reader annotations after sync",
-                                "ZoteroReaderView",
-                                e,
                             );
-                        });
 
-                        // Re-extract external annotations in case the file changed
-                        this.extractExternalAnnotation();
-                    });
+                            // Re-extract external annotations in case the file changed
+                            ff(
+                                this.extractExternalAnnotation(),
+                                "Failed to re-extract external annotations",
+                            );
+                        }),
+                        "Failed to refresh the attachment after sync",
+                    );
 
                     // One refresh per update batch is enough
                     break;
@@ -599,7 +625,10 @@ export class ZoteroReaderView extends ItemView {
             services.settings.zoteroapikey,
         );
 
-        this.bridge.refreshAnnotations(annotations);
+        ff(
+            this.bridge.refreshAnnotations(annotations),
+            "Failed to refresh reader annotations",
+        );
     }
 
     /**
@@ -646,7 +675,10 @@ export class ZoteroReaderView extends ItemView {
 
             // Push extracted annotations to the reader iframe
             for (const annotation of annotations) {
-                this.bridge!.addAnnotation(annotation);
+                ff(
+                    this.bridge!.addAnnotation(annotation),
+                    "Failed to add an annotation to the reader",
+                );
             }
 
             // Refresh the in-memory extraction MD5 from IDB so subsequent

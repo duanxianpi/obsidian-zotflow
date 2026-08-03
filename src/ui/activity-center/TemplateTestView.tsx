@@ -552,7 +552,7 @@ export const TemplateTestView: React.FC = () => {
             <div className="zotflow-template-test-actions">
                 <button
                     className="mod-cta"
-                    onClick={handleRender}
+                    onClick={() => void handleRender()}
                     disabled={rendering}
                 >
                     {rendering ? "Rendering..." : "Render"}

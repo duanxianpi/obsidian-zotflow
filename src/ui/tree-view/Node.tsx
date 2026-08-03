@@ -305,7 +305,7 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
                     .onClick(async () => {
                         try {
                             // Open/update the note file (foreground)
-                            workerBridge.libraryNote.openNote(
+                            await workerBridge.libraryNote.openNote(
                                 node.data.libraryID,
                                 node.data.key,
                                 {

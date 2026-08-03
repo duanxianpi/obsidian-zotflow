@@ -341,7 +341,7 @@ export const RepairView: React.FC = () => {
             {/* Controls */}
             <div className="zotflow-repair-controls">
                 {(state === "idle" || state === "done") && (
-                    <button className="mod-cta" onClick={handleScan}>
+                    <button className="mod-cta" onClick={() => void handleScan()}>
                         <ObsidianIcon icon="search" />
                         <span>Scan Vault</span>
                     </button>
@@ -355,7 +355,7 @@ export const RepairView: React.FC = () => {
                 {state === "results" && items.length > 0 && (
                     <button
                         className="mod-cta"
-                        onClick={handleRepairAll}
+                        onClick={() => void handleRepairAll()}
                         disabled={selectedCount === 0}
                     >
                         <ObsidianIcon icon="check-circle" />
@@ -428,7 +428,7 @@ export const RepairView: React.FC = () => {
                                         item={item}
                                         index={idx}
                                         onSelect={handleSelectCandidate}
-                                        onRepair={handleRepairOne}
+                                        onRepair={(index) => void handleRepairOne(index)}
                                     />
                                 ))}
                             </tbody>

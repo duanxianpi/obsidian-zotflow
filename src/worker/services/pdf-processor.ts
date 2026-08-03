@@ -111,7 +111,7 @@ export class PDFProcessWorker {
             } else {
                 this._queue.push([fn, resolve, reject]);
             }
-            this._processQueue();
+            void this._processQueue();
         });
     }
 
@@ -157,154 +157,158 @@ export class PDFProcessWorker {
         this._worker = new Worker(this.config.pdfWorkerURL);
         this._worker.addEventListener(
             "message",
-            async (event: MessageEvent<WorkerMessage>) => {
-                let message = event.data;
-
-                // Handle Response (Worker -> Main Request)
-                if (message.responseID) {
-                    let resolver = this._waitingPromises[message.responseID];
-                    if (resolver) {
-                        let { resolve, reject } = resolver;
-                        delete this._waitingPromises[message.responseID];
-                        if (message.data) {
-                            resolve(message.data);
-                        } else {
-                            // Extract error details safely
-                            const rawErr = message.error || {};
-                            const errMsg =
-                                rawErr.message || JSON.stringify(rawErr);
-                            const errName = rawErr.name || "WorkerError";
-
-                            // Convert to ZotFlowError
-                            // Check specific names if we need to distinguish (e.g. PasswordException)
-                            reject(
-                                new ZotFlowError(
-                                    ZotFlowErrorCode.PARSE_ERROR,
-                                    "PDFProcessWorker",
-                                    `PDF Worker Error (${errName}): ${errMsg}`,
-                                ),
-                            );
-                        }
-                    }
-                    return;
-                }
-
-                // Handle Request (Worker -> Main Request)
-                if (message.id) {
-                    let respData: any = null;
-                    let respError: any = null;
-
-                    try {
-                        if (message.action === "FetchBuiltInCMap") {
-                            const cMapUrl =
-                                this._blobUrls[
-                                    `pdf/web/cmaps/${message.data}.bcmap`
-                                ];
-                            if (cMapUrl) {
-                                const response = await (
-                                    globalThis as any
-                                ).originalFetch(cMapUrl);
-                                const arrayBuffer =
-                                    await response.arrayBuffer();
-                                respData = {
-                                    isCompressed: true,
-                                    cMapData: new Uint8Array(arrayBuffer),
-                                };
+            (event: MessageEvent<WorkerMessage>) => {
+                // The listener contract is void; the handler reports its own
+                // failures, so the promise is marked rather than returned.
+                void (async () => {
+                    let message = event.data;
+    
+                    // Handle Response (Worker -> Main Request)
+                    if (message.responseID) {
+                        let resolver = this._waitingPromises[message.responseID];
+                        if (resolver) {
+                            let { resolve, reject } = resolver;
+                            delete this._waitingPromises[message.responseID];
+                            if (message.data) {
+                                resolve(message.data);
                             } else {
-                                this.parentHost.log(
-                                    "warn",
-                                    `CMap not found: ${message.data}`,
-                                    "PDFProcessWorker",
-                                );
-                                throw new Error(
-                                    `CMap not found: ${message.data}`,
+                                // Extract error details safely
+                                const rawErr = message.error || {};
+                                const errMsg =
+                                    rawErr.message || JSON.stringify(rawErr);
+                                const errName = rawErr.name || "WorkerError";
+    
+                                // Convert to ZotFlowError
+                                // Check specific names if we need to distinguish (e.g. PasswordException)
+                                reject(
+                                    new ZotFlowError(
+                                        ZotFlowErrorCode.PARSE_ERROR,
+                                        "PDFProcessWorker",
+                                        `PDF Worker Error (${errName}): ${errMsg}`,
+                                    ),
                                 );
                             }
                         }
-                    } catch (e) {
-                        this.parentHost.log(
-                            "error",
-                            "Failed to fetch CMap data:",
-                            "PDFProcessWorker",
-                            e,
-                        );
-                        respError = { message: (e as Error).message };
+                        return;
                     }
-
-                    try {
-                        if (message.action === "FetchStandardFontData") {
-                            const fontUrl =
-                                this._blobUrls[
-                                    `pdf/web/standard_fonts/${message.data}`
-                                ];
-                            if (fontUrl) {
-                                const response = await (
-                                    globalThis as any
-                                ).originalFetch(fontUrl);
-                                const arrayBuffer =
-                                    await response.arrayBuffer();
-                                respData = new Uint8Array(arrayBuffer);
-                            } else {
-                                this.parentHost.log(
-                                    "warn",
-                                    `Standard font not found: ${message.data}`,
-                                    "PDFProcessWorker",
-                                );
-                                throw new Error(
-                                    `Standard font not found: ${message.data}`,
-                                );
+    
+                    // Handle Request (Worker -> Main Request)
+                    if (message.id) {
+                        let respData: any = null;
+                        let respError: any = null;
+    
+                        try {
+                            if (message.action === "FetchBuiltInCMap") {
+                                const cMapUrl =
+                                    this._blobUrls[
+                                        `pdf/web/cmaps/${message.data}.bcmap`
+                                    ];
+                                if (cMapUrl) {
+                                    const response = await (
+                                        globalThis as any
+                                    ).originalFetch(cMapUrl);
+                                    const arrayBuffer =
+                                        await response.arrayBuffer();
+                                    respData = {
+                                        isCompressed: true,
+                                        cMapData: new Uint8Array(arrayBuffer),
+                                    };
+                                } else {
+                                    this.parentHost.log(
+                                        "warn",
+                                        `CMap not found: ${message.data}`,
+                                        "PDFProcessWorker",
+                                    );
+                                    throw new Error(
+                                        `CMap not found: ${message.data}`,
+                                    );
+                                }
                             }
-                        }
-                    } catch (e) {
-                        this.parentHost.log(
-                            "error",
-                            "Failed to fetch standard font data:",
-                            "PDFProcessWorker",
-                            e,
-                        );
-                        respError = { message: (e as Error).message };
-                    }
-
-                    try {
-                        if (message.action === "SaveRenderedAnnotation") {
-                            const { libraryID, annotationKey, buf } =
-                                message.data;
-
-                            await db.items
-                                .where({ libraryID, key: annotationKey })
-                                .modify((item) => {
-                                    item.annotationImageVersion = item.version;
-                                });
-                            const folder =
-                                this.settings.annotationImageFolder.replace(
-                                    /\/$/,
-                                    "",
-                                );
-                            const path = `${folder}/${annotationKey}.png`;
-
-                            await this.parentHost.writeBinaryFile(
-                                path,
-                                Comlink.transfer(buf, [buf]),
+                        } catch (e) {
+                            this.parentHost.log(
+                                "error",
+                                "Failed to fetch CMap data:",
+                                "PDFProcessWorker",
+                                e,
                             );
-
-                            respData = true;
+                            respError = { message: (e as Error).message };
                         }
-                    } catch (e) {
-                        this.parentHost.log(
-                            "error",
-                            "Failed to render annotations:",
-                            "PDFProcessWorker",
-                            e,
-                        );
-                        respError = { message: (e as Error).message };
+    
+                        try {
+                            if (message.action === "FetchStandardFontData") {
+                                const fontUrl =
+                                    this._blobUrls[
+                                        `pdf/web/standard_fonts/${message.data}`
+                                    ];
+                                if (fontUrl) {
+                                    const response = await (
+                                        globalThis as any
+                                    ).originalFetch(fontUrl);
+                                    const arrayBuffer =
+                                        await response.arrayBuffer();
+                                    respData = new Uint8Array(arrayBuffer);
+                                } else {
+                                    this.parentHost.log(
+                                        "warn",
+                                        `Standard font not found: ${message.data}`,
+                                        "PDFProcessWorker",
+                                    );
+                                    throw new Error(
+                                        `Standard font not found: ${message.data}`,
+                                    );
+                                }
+                            }
+                        } catch (e) {
+                            this.parentHost.log(
+                                "error",
+                                "Failed to fetch standard font data:",
+                                "PDFProcessWorker",
+                                e,
+                            );
+                            respError = { message: (e as Error).message };
+                        }
+    
+                        try {
+                            if (message.action === "SaveRenderedAnnotation") {
+                                const { libraryID, annotationKey, buf } =
+                                    message.data;
+    
+                                await db.items
+                                    .where({ libraryID, key: annotationKey })
+                                    .modify((item) => {
+                                        item.annotationImageVersion = item.version;
+                                    });
+                                const folder =
+                                    this.settings.annotationImageFolder.replace(
+                                        /\/$/,
+                                        "",
+                                    );
+                                const path = `${folder}/${annotationKey}.png`;
+    
+                                await this.parentHost.writeBinaryFile(
+                                    path,
+                                    Comlink.transfer(buf, [buf]),
+                                );
+    
+                                respData = true;
+                            }
+                        } catch (e) {
+                            this.parentHost.log(
+                                "error",
+                                "Failed to render annotations:",
+                                "PDFProcessWorker",
+                                e,
+                            );
+                            respError = { message: (e as Error).message };
+                        }
+    
+                        this._worker!.postMessage({
+                            responseID: message.id,
+                            data: respData,
+                            error: respError, // Explicitly send error back
+                        });
                     }
-
-                    this._worker!.postMessage({
-                        responseID: message.id,
-                        data: respData,
-                        error: respError, // Explicitly send error back
-                    });
-                }
+                })();
             },
         );
         this._worker.addEventListener("error", (event) => {

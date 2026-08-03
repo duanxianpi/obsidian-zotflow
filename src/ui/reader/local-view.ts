@@ -15,11 +15,14 @@ import type {
 } from "types/zotero-reader";
 import type { TagInput } from "worker/services/tag";
 import { services } from "services/services";
+import { fireAndForgetIn } from "utils/fire-and-forget";
 
 /** View type identifier for the local vault file reader view. */
 export const LOCAL_ZOTERO_READER_VIEW_TYPE = "zotflow-local-zotero-reader-view";
 
 /** Obsidian `ItemView` that embeds the Zotero reader iframe for local PDF/EPUB/HTML vault files. */
+const ff = fireAndForgetIn("LocalReaderView");
+
 export class LocalReaderView extends ItemView {
     private file: TFile | null = null;
     private bridge?: IframeReaderBridge;
@@ -104,10 +107,13 @@ export class LocalReaderView extends ItemView {
                     .getElementsByClassName("view-header-title")[0]
                     ?.setText(this.file.name);
 
-                this.loadDocument(this.file);
+                ff(
+                    this.loadDocument(this.file),
+                    "Failed to load document",
+                );
             }
         }
-        super.setState(state, result);
+        return super.setState(state, result);
     }
 
     getState(): any {
@@ -124,7 +130,7 @@ export class LocalReaderView extends ItemView {
         loadingEl.setText(`Loading ${file.name}...`);
 
         try {
-            this.renderReader(file);
+            ff(this.renderReader(file), "Failed to render the reader");
         } catch (e) {
             services.logService.error(
                 "Error loading document",
@@ -194,12 +200,18 @@ export class LocalReaderView extends ItemView {
                     this.handleOpenLink(evt.url);
                 });
 
-                this.bridge.onEventType("annotationsSaved", async (evt) => {
-                    await this.handleAnnotationsSaved(evt.annotations);
+                this.bridge.onEventType("annotationsSaved", (evt) => {
+                    ff(
+                        this.handleAnnotationsSaved(evt.annotations),
+                        "Failed to apply saved annotations",
+                    );
                 });
 
-                this.bridge.onEventType("annotationsDeleted", async (evt) => {
-                    await this.handleAnnotationsDeleted(evt.ids);
+                this.bridge.onEventType("annotationsDeleted", (evt) => {
+                    ff(
+                        this.handleAnnotationsDeleted(evt.ids),
+                        "Failed to apply deleted annotations",
+                    );
                 });
 
                 this.bridge.onEventType("openTagsPopup", (evt) => {
@@ -240,7 +252,10 @@ export class LocalReaderView extends ItemView {
                                 newColorScheme &&
                                 newColorScheme !== this.colorScheme
                             ) {
-                                this.bridge!.setColorScheme(newColorScheme);
+                                ff(
+                                    this.bridge!.setColorScheme(newColorScheme),
+                                    "Failed to set the reader colour scheme",
+                                );
                                 this.colorScheme = newColorScheme;
                             }
                         }
@@ -299,15 +314,18 @@ export class LocalReaderView extends ItemView {
                 const type = this.getReaderType(file.extension);
 
                 // Initialize Reader Logic
-                this.bridge.initReader({
-                    data: {
-                        buf: new Uint8Array(buffer),
-                        url: null,
-                    },
-                    type: type as any,
-                    authorName: "",
-                    ...opts,
-                });
+                ff(
+                    this.bridge.initReader({
+                        data: {
+                            buf: new Uint8Array(buffer),
+                            url: null,
+                        },
+                        type: type as any,
+                        authorName: "",
+                        ...opts,
+                    }),
+                    "Failed to initialise the reader",
+                );
             }
         } catch (e: any) {
             services.logService.error(
@@ -364,7 +382,10 @@ export class LocalReaderView extends ItemView {
 
     readerNavigate(navigationInfo: any) {
         if (!this.bridge) return;
-        this.bridge.navigate(navigationInfo);
+        ff(
+            this.bridge.navigate(navigationInfo),
+            "Failed to navigate the reader",
+        );
     }
 
     async onClose() {

@@ -20,7 +20,16 @@ export class ZotFlowSettingTab extends PluginSettingTab {
         this.icon = "zotero-icon";
     }
 
-    async display(): Promise<void> {
+    /**
+     * Obsidian declares `display(): void` and never awaits it, so the async
+     * work is kicked off explicitly rather than by returning a promise the
+     * framework will drop.
+     */
+    display(): void {
+        void this.render();
+    }
+
+    private async render(): Promise<void> {
         await this.plugin.loadSettings();
 
         const { containerEl } = this;
@@ -48,35 +57,47 @@ export class ZotFlowSettingTab extends PluginSettingTab {
 
         switch (this.activeTab) {
             case "sync":
-                const syncSection = new SyncSection(this.plugin, refreshUI);
+            {
+                    const syncSection = new SyncSection(this.plugin, refreshUI);
                 await syncSection.render(contentContainer);
                 break;
+            }
             case "webdav":
-                const webDavSection = new WebDavSection(this.plugin, refreshUI);
+            {
+                    const webDavSection = new WebDavSection(this.plugin, refreshUI);
                 webDavSection.render(contentContainer);
                 break;
+            }
             case "cache":
-                const cacheSection = new CacheSection(this.plugin, refreshUI);
+            {
+                    const cacheSection = new CacheSection(this.plugin, refreshUI);
                 await cacheSection.render(contentContainer);
                 break;
+            }
             case "general":
-                const generalSection = new GeneralSection(
+            {
+                    const generalSection = new GeneralSection(
                     this.plugin,
                     refreshUI,
                 );
                 generalSection.render(contentContainer);
                 break;
+            }
             case "citation":
-                const citationSection = new CitationSection(
+            {
+                    const citationSection = new CitationSection(
                     this.plugin,
                     refreshUI,
                 );
                 citationSection.render(contentContainer);
                 break;
+            }
             case "csl":
-                const cslSection = new CslSection(this.plugin, refreshUI);
+            {
+                    const cslSection = new CslSection(this.plugin, refreshUI);
                 await cslSection.render(contentContainer);
                 break;
+            }
         }
     }
 

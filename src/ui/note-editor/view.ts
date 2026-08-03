@@ -10,6 +10,9 @@ import {
 import type { ViewStateResult } from "obsidian";
 import type { NoteData } from "types/zotero-item";
 import type { IDBZoteroItem } from "types/db-schema";
+import { fireAndForgetIn } from "utils/fire-and-forget";
+
+const ff = fireAndForgetIn("NoteEditorView");
 
 export const NOTE_EDITOR_VIEW_TYPE = "zotflow-note-editor-view";
 
@@ -79,7 +82,7 @@ export class NoteEditorView extends ItemView {
         await this.renderContent();
         this.subscribeToSyncEvents();
         this.subscribeToNoteChanges();
-        super.setState(state, result);
+        return super.setState(state, result);
     }
 
     getState(): NoteEditorState {
@@ -158,7 +161,7 @@ export class NoteEditorView extends ItemView {
         }
         this.saveTimer = setTimeout(() => {
             this.saveTimer = undefined;
-            this.saveContent();
+            ff(this.saveContent(), "Failed to save the note");
         }, SAVE_DEBOUNCE_MS);
     }
 
@@ -228,7 +231,10 @@ export class NoteEditorView extends ItemView {
                         continue;
                     }
 
-                    this.refreshAfterSync();
+                    ff(
+                        this.refreshAfterSync(),
+                        "Failed to refresh after sync",
+                    );
                 }
             },
         );
@@ -246,7 +252,10 @@ export class NoteEditorView extends ItemView {
             services.taskMonitor.noteChangedByEditor.subscribe(
                 (_libraryID, noteKey, _parentItemKey) => {
                     if (noteKey !== this.noteItem?.key) return;
-                    this.refreshAfterSync();
+                    ff(
+                        this.refreshAfterSync(),
+                        "Failed to refresh after sync",
+                    );
                 },
             );
     }

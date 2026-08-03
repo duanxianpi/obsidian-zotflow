@@ -3,6 +3,9 @@ import { ObsidianIcon } from "../ObsidianIcon";
 import { services } from "services/services";
 
 import type { LogLevel, LogEntry } from "services/log-service";
+import { fireAndForgetIn } from "utils/fire-and-forget";
+
+const ff = fireAndForgetIn("TelemetryView");
 
 type LogFilter = "all" | LogLevel;
 
@@ -54,8 +57,19 @@ const LogLine: React.FC<{ entry: LogEntry }> = ({ entry }) => {
     const handleCopyEntry = useCallback(
         (e: React.MouseEvent) => {
             e.stopPropagation();
-            navigator.clipboard.writeText(formatEntryText(entry));
-            services.notificationService.notify("success", "Log entry copied");
+            // Notify only once the write resolves — it used to claim
+            // success before knowing whether it had happened.
+            ff(
+                navigator.clipboard
+                    .writeText(formatEntryText(entry))
+                    .then(() =>
+                        services.notificationService.notify(
+                            "success",
+                            "Log entry copied",
+                        ),
+                    ),
+                "Failed to copy the log entry",
+            );
         },
         [entry],
     );
@@ -135,10 +149,16 @@ export const TelemetryView: React.FC = () => {
 
     const handleCopy = useCallback(() => {
         const text = filteredLogs.map((e) => formatEntryText(e)).join("\n");
-        navigator.clipboard.writeText(text);
-        services.notificationService.notify(
-            "success",
-            "Logs copied to clipboard",
+        ff(
+            navigator.clipboard
+                .writeText(text)
+                .then(() =>
+                    services.notificationService.notify(
+                        "success",
+                        "Logs copied to clipboard",
+                    ),
+                ),
+            "Failed to copy the logs",
         );
     }, [filteredLogs]);
 

@@ -14,6 +14,9 @@ import type {
     SuggestionItem,
     SuggestionItemFilter,
 } from "./zotero-item-suggest";
+import { fireAndForgetIn } from "utils/fire-and-forget";
+
+const ff = fireAndForgetIn("SuggestModalBase");
 
 /**
  * Abstract base class for Zotero item search modals.
@@ -80,10 +83,10 @@ export abstract class BaseItemSearchModal extends SuggestModal<SuggestionItem> {
         this.suggest.renderSuggestion(item, el, this.inputEl.value);
     }
 
-    async onChooseSuggestion(
+    onChooseSuggestion(
         item: SuggestionItem,
         evt: MouseEvent | KeyboardEvent,
-    ) {}
+    ): void {}
 
     selectSuggestion(
         item: SuggestionItem,
@@ -125,7 +128,7 @@ export class ZoteroSearchModal extends BaseItemSearchModal {
         item: AnyIDBZoteroItem,
         evt: MouseEvent | KeyboardEvent,
     ): void {
-        this.handleSelection(item, evt);
+        ff(this.handleSelection(item, evt), "Failed to open the selection");
     }
 
     private async handleSelection(
@@ -133,7 +136,10 @@ export class ZoteroSearchModal extends BaseItemSearchModal {
         evt: MouseEvent | KeyboardEvent,
     ) {
         if (item.itemType === "attachment") {
-            openAttachment(item.libraryID, item.key, this.app);
+            ff(
+                openAttachment(item.libraryID, item.key, this.app),
+                "Failed to open the attachment",
+            );
             this.close();
             return;
         }
@@ -149,10 +155,13 @@ export class ZoteroSearchModal extends BaseItemSearchModal {
                 `No attachments found for item: ${item.title}`,
             );
         } else if (attachments.length === 1) {
-            openAttachment(
-                attachments[0]!.libraryID,
-                attachments[0]!.key,
-                this.app,
+            ff(
+                openAttachment(
+                    attachments[0]!.libraryID,
+                    attachments[0]!.key,
+                    this.app,
+                ),
+                "Failed to open the attachment",
             );
             this.close();
         } else {

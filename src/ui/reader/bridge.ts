@@ -370,7 +370,7 @@ export class IframeReaderBridge {
                 comp.load();
                 container.empty();
                 container.addClass("content");
-                MarkdownRenderer.render(
+                void MarkdownRenderer.render(
                     services.app,
                     text,
                     container,

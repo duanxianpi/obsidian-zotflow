@@ -277,11 +277,11 @@ export class WorkerBridge {
 
     cancelTask(taskId: string): void {
         this.assertInitialized();
-        this._api.cancelTask(taskId);
+        void this._api.cancelTask(taskId);
     }
 
     updateSettings(newSettings: ZotFlowSettings) {
-        this._api.updateSettings(newSettings);
+        void this._api.updateSettings(newSettings);
     }
 
     terminate() {
