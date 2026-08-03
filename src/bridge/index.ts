@@ -32,7 +32,6 @@ import type { CslRenderWorkerService } from "worker/services/csl-render";
 import type { BatchNoteInput } from "worker/tasks/impl/batch-note-task";
 import type {
     BatchExtractImagesInput,
-    ItemIdentifier,
 } from "worker/tasks/impl/batch-extract-images-task";
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
@@ -50,26 +49,26 @@ export class WorkerBridge {
 
     private _api: Comlink.Remote<WorkerAPI>;
 
-    private _attachment: AttachmentService;
-    private _sync: SyncService;
-    private _zotero: ZoteroAPIService;
-    private _webdav: WebDavService;
-    private _treeView: TreeViewService;
-    private _libraryNote: LibraryNoteService;
-    private _itemNote: ItemNoteService;
-    private _localNote: LocalNoteService;
-    private _conflict: ConflictService;
-    private _annotation: AnnotationService;
-    private _key: KeyService;
-    private _library: LibraryService;
-    private _dbHelper: DbHelperService;
-    private _tag: TagService;
-    private _pdfProcessor: PDFProcessWorker;
-    private _libraryTemplate: LibraryTemplateService;
-    private _localTemplate: LocalTemplateService;
-    private _notePath: NotePathService;
-    private _cslRender: CslRenderWorkerService;
-    private _tasks: TaskManager;
+    private _attachment: Comlink.Remote<AttachmentService>;
+    private _sync: Comlink.Remote<SyncService>;
+    private _zotero: Comlink.Remote<ZoteroAPIService>;
+    private _webdav: Comlink.Remote<WebDavService>;
+    private _treeView: Comlink.Remote<TreeViewService>;
+    private _libraryNote: Comlink.Remote<LibraryNoteService>;
+    private _itemNote: Comlink.Remote<ItemNoteService>;
+    private _localNote: Comlink.Remote<LocalNoteService>;
+    private _conflict: Comlink.Remote<ConflictService>;
+    private _annotation: Comlink.Remote<AnnotationService>;
+    private _key: Comlink.Remote<KeyService>;
+    private _library: Comlink.Remote<LibraryService>;
+    private _dbHelper: Comlink.Remote<DbHelperService>;
+    private _tag: Comlink.Remote<TagService>;
+    private _pdfProcessor: Comlink.Remote<PDFProcessWorker>;
+    private _libraryTemplate: Comlink.Remote<LibraryTemplateService>;
+    private _localTemplate: Comlink.Remote<LocalTemplateService>;
+    private _notePath: Comlink.Remote<NotePathService>;
+    private _cslRender: Comlink.Remote<CslRenderWorkerService>;
+    private _tasks: Comlink.Remote<TaskManager>;
 
     private _workerBlobUrl: string;
     private _initialized = false;
@@ -92,6 +91,16 @@ export class WorkerBridge {
             blobUrls,
         );
 
+        /*
+         * Each of these awaits is a real round trip, despite `await-thenable`:
+         * a Comlink proxy is thenable at runtime (the `then` trap sends a GET),
+         * and the worker's getters return `Comlink.proxy(service)`, so awaiting
+         * materialises a dedicated MessagePort for that service. Comlink's own
+         * types do not model the `then` trap, which is why the rule fires.
+         * Dropping the awaits would reroute every call through the root proxy.
+         */
+        /* eslint-disable @typescript-eslint/await-thenable -- Comlink proxies are
+           thenable at runtime; its types do not model the `then` trap. */
         this._attachment = await this._api.attachment;
         this._sync = await this._api.sync;
         this._zotero = await this._api.zotero;
@@ -112,6 +121,8 @@ export class WorkerBridge {
         this._notePath = await this._api.notePath;
         this._cslRender = await this._api.cslRender;
         this._tasks = await this._api.tasks;
+        /* eslint-enable @typescript-eslint/await-thenable -- end of the proxy
+           materialisation block. */
 
         this._initialized = true;
         services.logService.log(
