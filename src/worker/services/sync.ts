@@ -968,8 +968,12 @@ export class SyncService {
             for (const chunk of chunks) {
                 // Prepare Payload & Sanitization
                 const payload = chunk.map((item) => {
+                    // `data` is copied too: a spread of the envelope alone
+                    // shares it with the stored item, and everything below
+                    // writes into `data`.
                     const itemRawData = {
                         ...item.raw,
+                        data: { ...item.raw.data },
                     } as unknown as WritePayload;
 
                     if (itemRawData.data.dateAdded)

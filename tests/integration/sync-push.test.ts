@@ -260,6 +260,47 @@ describe("write response handling", () => {
         expect(stored.version).not.toBe(before);
     });
 
+    test("a rejected push leaves the stored raw untouched", async () => {
+        // Building the outgoing payload must not edit the item it was built
+        // from. On success the raw is replaced by the server's echo and the
+        // damage is invisible, but a rejected item keeps its local raw — and
+        // that copy has to still be the one that was there before the attempt.
+        h = await createSyncHarness();
+        await seedItem({
+            libraryID: USER_ID,
+            key: "ANNO0001",
+            syncStatus: "updated",
+            itemType: "annotation",
+            raw: {
+                key: "ANNO0001",
+                version: 1,
+                library: { type: "user", id: USER_ID, name: "Library" },
+                data: {
+                    key: "ANNO0001",
+                    version: 1,
+                    itemType: "annotation",
+                    dateAdded: "2020-01-01T00:00:00.000Z",
+                    dateModified: "2020-01-01T00:00:00.000Z",
+                    annotationIsExternal: true,
+                    tags: [],
+                    relations: {},
+                },
+            } as never,
+        });
+        h.server
+            .library(USER_ID)
+            .rejectWrite("ANNO0001", { code: 400, message: "nope" });
+
+        await h.sync.startSync();
+
+        const stored = (await db.items.get([USER_ID, "ANNO0001"]))!;
+        expect(stored.syncStatus).toBe("conflict");
+        const data = stored.raw.data as unknown as Record<string, unknown>;
+        // `annotationIsExternal` is stripped from the payload, never from us.
+        expect(data.annotationIsExternal).toBe(true);
+        expect(data.dateModified).toBe("2020-01-01T00:00:00.000Z");
+    });
+
     test("the server's echoed payload replaces the stored raw", async () => {
         // The write response is authoritative: the server may normalise or
         // add fields, and a local raw left behind would resurface as a phantom
