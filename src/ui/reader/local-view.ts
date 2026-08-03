@@ -1,4 +1,4 @@
-import { FileView, WorkspaceLeaf, TFile, ItemView } from "obsidian";
+import { WorkspaceLeaf, TFile, ItemView } from "obsidian";
 import { workerBridge } from "bridge";
 import { IframeReaderBridge } from "./bridge";
 import { LocalDataManager } from "./local-data-manager";
@@ -264,7 +264,7 @@ export class LocalReaderView extends ItemView {
             }
 
             // Connect Bridge & Get File concurrently
-            const [_, buffer, loadedAnnotations] = await Promise.all([
+            const [, buffer, loadedAnnotations] = await Promise.all([
                 this.bridge.connect(),
                 this.app.vault.readBinary(file),
                 (async () => {
@@ -320,7 +320,7 @@ export class LocalReaderView extends ItemView {
                             buf: new Uint8Array(buffer),
                             url: null,
                         },
-                        type: type as any,
+                        type: type,
                         authorName: "",
                         ...opts,
                     }),

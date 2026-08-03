@@ -1,4 +1,4 @@
-import { Setting, setIcon, SettingGroup } from "obsidian";
+import { Setting, SettingGroup } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 

@@ -1,4 +1,3 @@
-import { setIcon } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { parseSearchQuery, splitHighlight } from "utils/search-query";
@@ -89,9 +88,7 @@ export class ZoteroItemSuggest {
                 .filter((item) => this.shouldIncludeItem(item));
 
             if (zItems.length > 0) {
-                const firstHeader = items.find((i) => "isHeader" in i) as
-                    | SearchHeader
-                    | undefined;
+                const firstHeader = items.find((i) => "isHeader" in i);
                 items = [...(firstHeader ? [firstHeader] : []), ...zItems];
             } else {
                 items = [];

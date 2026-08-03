@@ -1,6 +1,5 @@
 import * as Comlink from "comlink";
 import {
-    Notice,
     requestUrl,
     App,
     TFile,
@@ -47,13 +46,6 @@ export class ParentHost implements IParentProxy {
 
     public async request(request: RequestUrlParam): Promise<IRequestResponse> {
         try {
-            const req = {
-                url: request.url,
-                method: request.method,
-                headers: request.headers,
-                body: request.body,
-                contentType: request.contentType,
-            };
             const response = await requestUrl(request);
             const buffer = response.arrayBuffer;
             return Comlink.transfer(

@@ -107,7 +107,7 @@ export abstract class BaseItemSearchModal extends SuggestModal<SuggestionItem> {
             return;
         }
 
-        const zItem = item as AnyIDBZoteroItem;
+        const zItem = item;
         this.handleItemSelected(zItem, evt);
     }
 }

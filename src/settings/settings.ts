@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, setIcon, SettingGroup } from "obsidian";
+import { App, PluginSettingTab, setIcon } from "obsidian";
 import { SyncSection } from "./sections/sync-section";
 import { WebDavSection } from "./sections/webdav-section";
 import { CacheSection } from "./sections/cache-section";
@@ -40,7 +40,7 @@ export class ZotFlowSettingTab extends PluginSettingTab {
             cls: "zotflow-settings-container",
         });
 
-        const title = settingsContainer.createDiv({
+        settingsContainer.createDiv({
             text: "ZotFlow Settings",
             cls: "zotflow-settings-title",
         });

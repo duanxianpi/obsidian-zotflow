@@ -3,7 +3,6 @@ import { db } from "db/db";
 import { getAnnotationJson } from "db/annotation";
 
 import type { IParentProxy } from "bridge/types";
-import type { LibraryNoteService } from "worker/services/library-note";
 import type { AttachmentService } from "worker/services/attachment";
 import type { PDFProcessWorker } from "worker/services/pdf-processor";
 import type { ZotFlowSettings } from "settings/types";
@@ -139,7 +138,7 @@ export class BatchExtractImagesTask extends BaseTask {
         let attachments: IDBZoteroItem<AttachmentData>[];
 
         if (item.itemType === "attachment") {
-            attachments = [item as IDBZoteroItem<AttachmentData>];
+            attachments = [item];
         } else {
             attachments = (await db.items
                 .where({

@@ -104,7 +104,7 @@ export class IframeReaderBridge {
         if (!this.typedListeners.has(eventType)) {
             this.typedListeners.set(eventType, new Set());
         }
-        const typedCb = cb as (e: ChildEvents) => void;
+        const typedCb = cb;
         this.typedListeners.get(eventType)!.add(typedCb);
         return () => {
             const listeners = this.typedListeners.get(eventType);
@@ -339,7 +339,7 @@ export class IframeReaderBridge {
             ) => {
                 const editor = createEmbeddableMarkdownEditor(
                     (window as any).app,
-                    container as HTMLElement,
+                    container,
                     {
                         ...options,
                         onBlur: (editor) => {

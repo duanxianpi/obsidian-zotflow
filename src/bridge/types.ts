@@ -2,7 +2,7 @@ import type { TFileWithoutParentAndVault } from "types/zotflow";
 import type { NotificationType } from "services/notification-service";
 import type { LogLevel } from "services/log-service";
 
-import type { ITaskInfo, ITaskOptions } from "types/tasks";
+import type { ITaskInfo } from "types/tasks";
 import type { RequestUrlParam } from "obsidian";
 
 /** Shape of an HTTP response proxied from main thread to worker. */

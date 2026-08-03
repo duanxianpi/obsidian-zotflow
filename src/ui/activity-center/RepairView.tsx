@@ -71,7 +71,7 @@ function extractPageFromDisplay(display: string): string | null {
  * Returns a list of RepairItems with candidate matches.
  */
 async function scanVault(): Promise<RepairItem[]> {
-    const app = services.indexService["app"] as import("obsidian").App;
+    const app = services.indexService["app"];
     const indexedFiles = services.indexService.getAllIndexedFiles();
     const results: RepairItem[] = [];
 
@@ -208,7 +208,7 @@ async function applyRepair(
     item: RepairItem,
     newBlockId: string,
 ): Promise<boolean> {
-    const app = services.indexService["app"] as import("obsidian").App;
+    const app = services.indexService["app"];
     try {
         const oldRef = `#^${item.ref.oldBlockId}`;
         const newRef = `#^${newBlockId}`;

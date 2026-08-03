@@ -646,7 +646,7 @@ declare module "obsidian" {
         showPreview(show?: boolean): void;
     }
 
-    interface AbstractInputSuggest<T> {
+    interface AbstractInputSuggest {
         suggestEl: HTMLElement;
     }
 

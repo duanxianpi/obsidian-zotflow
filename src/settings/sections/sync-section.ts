@@ -4,7 +4,6 @@ import { services } from "services/services";
 
 import type ZotFlow from "main";
 import type { LibrarySyncMode } from "settings/types";
-import type { LibraryRow } from "worker/services/key";
 
 /** Settings section for API key verification and per-library sync mode configuration. */
 export class SyncSection {

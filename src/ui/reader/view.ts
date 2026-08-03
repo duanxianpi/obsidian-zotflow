@@ -141,7 +141,7 @@ export class ZoteroReaderView extends ItemView {
                     `Item ${state.itemKey} doesn't exist or is not an attachment`,
                 );
             }
-            this.attachmentItem = _item as IDBZoteroItem<AttachmentData>;
+            this.attachmentItem = _item;
 
             this.keyInfo = _keyInfo;
             this.containerEl
@@ -314,7 +314,7 @@ export class ZoteroReaderView extends ItemView {
             }
 
             // Connect Bridge & Get File concurrently
-            const [_, fileBlob] = await Promise.all([
+            const [, fileBlob] = await Promise.all([
                 this.bridge.connect(),
                 workerBridge
                     .downloadAttachment(this.attachmentItem)
@@ -812,7 +812,7 @@ export class ZoteroReaderView extends ItemView {
                 return;
             }
 
-            const data = annoItem.raw.data as AnnotationData;
+            const data = annoItem.raw.data;
             const current = data.tags ?? [];
             const all = await workerBridge.tag.getTagNames();
 

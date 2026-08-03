@@ -26,14 +26,6 @@ export interface BatchExtractExternalAnnotationsInput {
 }
 
 /**
- * Result of the extraction, available after the task completes.
- */
-interface ExtractionResult {
-    /** External annotations converted to AnnotationJSON (for reader bridge). */
-    annotations: AnnotationJSON[];
-}
-
-/**
  * BatchExtractExternalAnnotationsTask — extracts external (embedded PDF)
  * annotations via `PDFProcessWorker.import()`.
  *
@@ -70,7 +62,7 @@ export class BatchExtractExternalAnnotationsTask extends BaseTask {
         for (const { libraryID, itemKey } of this.input.items) {
             const item = await db.items.get([libraryID, itemKey]);
             if (item && item.itemType === "attachment") {
-                resolvedItems.push(item as IDBZoteroItem<AttachmentData>);
+                resolvedItems.push(item);
             }
         }
 

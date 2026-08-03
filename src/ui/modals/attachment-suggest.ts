@@ -1,5 +1,4 @@
-import { App, SuggestModal, setIcon } from "obsidian";
-import { getAttachmentFileIcon } from "ui/icons";
+import { App, SuggestModal } from "obsidian";
 import { openAttachment } from "utils/viewer";
 
 import type { AttachmentData } from "types/zotero-item";

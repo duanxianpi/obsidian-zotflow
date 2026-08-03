@@ -192,8 +192,8 @@ export class ConflictService {
         // Re-normalize from server copy to refresh derived fields
         const normalized = normalizeItem(item.serverCopyRaw, item.libraryID);
         normalized.syncStatus = "synced";
-        (normalized as AnyIDBZoteroItem).syncError = "";
-        (normalized as AnyIDBZoteroItem).serverCopyRaw = undefined;
+        (normalized).syncError = "";
+        (normalized).serverCopyRaw = undefined;
 
         await db.items.put(normalized);
     }

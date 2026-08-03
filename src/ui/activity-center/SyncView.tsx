@@ -6,7 +6,6 @@ import { services } from "services/services";
 import type {
     ConflictItemInfo,
     ConflictAction,
-    FieldDiff,
 } from "worker/services/conflict";
 import type { LibraryRow } from "worker/services/key";
 

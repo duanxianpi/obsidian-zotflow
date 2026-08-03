@@ -6,7 +6,6 @@ import { WebDavService } from "./webdav";
 import { ZoteroAPIService } from "./zotero";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
-import type { Unzipped } from "fflate";
 import type { ZotFlowSettings } from "settings/types";
 import type { AttachmentData } from "types/zotero-item";
 import type { IParentProxy } from "bridge/types";
@@ -786,13 +785,13 @@ export class AttachmentService {
                                 entryCount: Object.keys(unzipped).length,
                                 targetFileName,
                                 payloadBytes:
-                                    unzipped[targetFileName]!.byteLength,
+                                    unzipped[targetFileName].byteLength,
                                 elapsedMs: Date.now() - startedAt,
                             },
                         );
 
                         resolve(
-                            unzipped[targetFileName]!.buffer as ArrayBuffer,
+                            unzipped[targetFileName].buffer,
                         );
                     },
                 );
@@ -891,7 +890,7 @@ export class AttachmentService {
                                 return;
                             }
                             resolve(
-                                unzipped[targetFileName]!.buffer as ArrayBuffer,
+                                unzipped[targetFileName]!.buffer,
                             );
                         },
                     );

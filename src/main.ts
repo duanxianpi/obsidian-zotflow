@@ -1,13 +1,9 @@
-import * as Comlink from "comlink";
 import {
     addIcon,
-    App,
     Component,
-    Editor,
     MarkdownRenderer,
     MarkdownView,
     Menu,
-    Modal,
     Plugin,
     TFile,
     TAbstractFile,
@@ -54,7 +50,6 @@ import {
     LocalReaderView,
 } from "ui/reader/local-view";
 import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "ui/note-editor/view";
-import { ZotFlowCommentExtension } from "ui/editor/zotflow-comment-extension";
 import { ZotFlowRegionDecorationExtension } from "ui/editor/zotflow-region-decoration-extension";
 import { CitationSuggest } from "ui/editor/citation-suggest";
 import { fireAndForgetIn } from "utils/fire-and-forget";
@@ -792,8 +787,8 @@ export default class ZotFlow extends Plugin {
                     .onClick(async () => {
                         try {
                             await workerBridge.libraryNote.triggerUpdate(
-                                libraryID as number,
-                                zoteroKey as string,
+                                libraryID,
+                                zoteroKey,
                                 {},
                                 false,
                             );
@@ -821,8 +816,8 @@ export default class ZotFlow extends Plugin {
                     .onClick(async () => {
                         try {
                             await workerBridge.libraryNote.triggerUpdate(
-                                libraryID as number,
-                                zoteroKey as string,
+                                libraryID,
+                                zoteroKey,
                                 {
                                     forceUpdateContent: true,
                                     forceUpdateImages: true,
@@ -847,7 +842,7 @@ export default class ZotFlow extends Plugin {
                     });
             });
 
-            if (services.libraryCache.canEditNotes(libraryID as number)) {
+            if (services.libraryCache.canEditNotes(libraryID)) {
                 menu.addItem((item) => {
                     item.setTitle("ZotFlow: Create child note")
                         .setIcon("sticky-note")
@@ -855,16 +850,16 @@ export default class ZotFlow extends Plugin {
                             try {
                                 const noteKey =
                                     await workerBridge.itemNote.createChildNote(
-                                        libraryID as number,
-                                        zoteroKey as string,
+                                        libraryID,
+                                        zoteroKey,
                                     );
                                 await workerBridge.libraryNote.triggerUpdate(
-                                    libraryID as number,
-                                    zoteroKey as string,
+                                    libraryID,
+                                    zoteroKey,
                                     { forceUpdateContent: true },
                                 );
                                 await openItemNote(
-                                    libraryID as number,
+                                    libraryID,
                                     noteKey,
                                     this.app,
                                 );
@@ -889,7 +884,7 @@ export default class ZotFlow extends Plugin {
                     .onClick(async () => {
                         await this.updateLocalSourceNoteFromMenu(
                             file,
-                            localAttachment as string,
+                            localAttachment,
                         );
                     });
             });
@@ -1009,8 +1004,8 @@ export default class ZotFlow extends Plugin {
             async () => {
                 if (isLibrarySourceNote) {
                     await this.openLibrarySourceNoteAttachment(
-                        libraryID as number,
-                        zoteroKey as string,
+                        libraryID,
+                        zoteroKey,
                     );
                 } else {
                     await this.openLocalSourceNoteAttachment(

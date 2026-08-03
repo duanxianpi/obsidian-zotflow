@@ -74,7 +74,7 @@ export class NoteEditorView extends ItemView {
             return;
         }
 
-        this.noteItem = item as IDBZoteroItem<NoteData>;
+        this.noteItem = item;
 
         // Update tab title
         this.updateTitle();
@@ -183,7 +183,7 @@ export class NoteEditorView extends ItemView {
                 this.noteItem.key,
             );
             if (updated && updated.itemType === "note") {
-                this.noteItem = updated as IDBZoteroItem<NoteData>;
+                this.noteItem = updated;
                 this.updateTitle();
             }
 
@@ -277,7 +277,7 @@ export class NoteEditorView extends ItemView {
 
         if (!item || item.itemType !== "note") return;
 
-        this.noteItem = item as IDBZoteroItem<NoteData>;
+        this.noteItem = item;
         this.updateTitle();
 
         await this.renderContent();
