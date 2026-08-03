@@ -303,6 +303,13 @@
     overflow: hidden;
 }
 
+/* Tab labels stay on one line; the row scrolls horizontally instead of
+   wrapping, which is what pushed "CSL Render" onto two lines. */
+.zotflow-settings-nav .nav-item {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .zotflow-settings-content {
     flex: 1;
     overflow: auto;
@@ -373,9 +380,12 @@
     width: 100%;
 }
 
+/* Appended to the SettingGroup's container rather than to a setting item, so
+   the item's horizontal padding has to be restored or the block sits flush
+   against the card edge. Same for .zotflow-settings-btn-container below. */
 .zotflow-settings-cache-usage {
     display: block;
-    padding-top: 0;
+    padding: 0 var(--size-4-5);
 }
 
 .zotflow-settings-cache-info {
@@ -401,6 +411,7 @@
 
 .zotflow-settings-btn-container {
     margin-top: 1rem;
+    padding: 0 var(--size-4-5);
 }
 
 .zotflow-settings-table-btn-container {

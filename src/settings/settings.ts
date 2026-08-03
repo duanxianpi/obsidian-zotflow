@@ -102,13 +102,15 @@ export class ZotFlowSettingTab extends PluginSettingTab {
     }
 
     private renderNav(containerEl: HTMLElement) {
-        const navContainer = containerEl.createDiv();
+        const navContainer = containerEl.createDiv({
+            cls: "zotflow-settings-nav",
+        });
         navContainer.setCssStyles({
             display: "flex",
             marginTop: "0.5rem",
             borderBottom: "1px solid var(--background-modifier-border)",
             overflowX: "auto",
-            overflowY: "auto",
+            overflowY: "hidden",
         });
 
         const tabs: { id: TabSection; label: string; icon: string }[] = [
