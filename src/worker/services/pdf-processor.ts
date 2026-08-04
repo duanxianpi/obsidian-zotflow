@@ -15,7 +15,7 @@ import type { ZotFlowSettings } from "settings/types";
 import type { IParentProxy } from "bridge/types";
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AnnotationData } from "types/zotero-item";
-import { annotationItemFromJSON } from "db/annotation";
+import type { AnnotationJSON } from "types/zotero-reader";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
 interface PDFWorkerConfig {
@@ -389,7 +389,10 @@ export class PDFProcessWorker {
     /**
      * Import annotations from PDF file
      */
-    async import(buf: ArrayBuffer, isPriority?: boolean): Promise<any[]> {
+    async import(
+        buf: ArrayBuffer,
+        isPriority?: boolean,
+    ): Promise<AnnotationJSON[]> {
         return this._enqueue(async () => {
             let imported: any[];
             try {
@@ -407,13 +410,20 @@ export class PDFProcessWorker {
                 );
             }
 
-            let annotations: any[] = [];
+            // The worker already emits the reader's annotation JSON, so this
+            // only supplies the fields a PDF has no source for.
+            let annotations: AnnotationJSON[] = [];
             for (let annotation of imported) {
                 annotation.id = Math.round(Math.random() * 4294967295)
                     .toString()
                     .slice(0, 8);
                 annotation.isExternal = true;
-                annotations.push(annotationItemFromJSON(annotation));
+                annotation.tags = annotation.tags ?? [];
+                annotation.dateModified = annotation.dateModified ?? "";
+                // A PDF annotation records only a modification stamp.
+                annotation.dateAdded =
+                    annotation.dateAdded ?? annotation.dateModified;
+                annotations.push(annotation);
             }
             return annotations;
         }, isPriority);
