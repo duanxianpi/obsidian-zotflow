@@ -10,22 +10,14 @@
 # `#` comments are ignored.
 
 scripts
-src/worker/convert
-src/worker/services/convert.ts
 src/utils/note-meta.ts
 src/utils/error.ts
 src/services/log-service.ts
 src/db/normalize.ts
 src/db/annotation.ts
-src/worker/services/liquid-support.ts
-src/worker/services/library-template.ts
-src/worker/services/local-template.ts
-src/worker/services/annotation.ts
-src/worker/services/library-note.ts
-src/worker/services/local-note.ts
-src/worker/services/item-note.ts
-src/worker/services/zotero.ts
-src/worker/worker.ts
-src/worker/services/sync.ts
-src/worker/services/pdf-processor.ts
+# The whole worker tree is clean, so it is locked as a directory rather than
+# file by file — that way a new service added under it starts out held to the
+# same bar instead of quietly joining the backlog.
+src/worker
+src/bridge/types.ts
 src/ui/editor/markdown-editor.ts
