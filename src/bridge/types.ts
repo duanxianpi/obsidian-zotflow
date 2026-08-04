@@ -24,7 +24,7 @@ export interface IParentProxy {
         level: LogLevel,
         message: string,
         context?: string,
-        details?: any,
+        details?: unknown,
     ): void;
     request(request: RequestUrlParam): Promise<IRequestResponse>;
 

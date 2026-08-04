@@ -29,7 +29,7 @@ export abstract class BaseTask {
         level: LogLevel,
         message: string,
         context?: string,
-        details?: any,
+        details?: unknown,
     ) {
         this.parentHost?.log(level, message, context, details);
     }

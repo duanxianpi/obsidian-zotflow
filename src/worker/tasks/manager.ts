@@ -38,7 +38,9 @@ export class TaskManager {
     public registerTask(task: BaseTask) {
         // cleanup old tasks (simple policy: keep max 50)
         if (this.tasks.size > 50) {
-            const oldest = this.tasks.keys().next().value;
+            // Destructured rather than `.next().value`, whose `IteratorResult`
+            // return slot is typed `any`.
+            const [oldest] = this.tasks.keys();
             if (oldest) this.tasks.delete(oldest);
         }
 

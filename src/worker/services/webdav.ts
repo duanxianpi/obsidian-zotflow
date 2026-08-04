@@ -155,7 +155,7 @@ export class WebDavService {
                     `WebDAV download failed with status: ${response.status}`,
                 );
             }
-        } catch (e: any) {
+        } catch (e) {
             this.parentHost.log(
                 "debug",
                 "WebDAV download raised exception.",
@@ -260,7 +260,7 @@ export class WebDavService {
                 },
             );
             return bytes;
-        } catch (e: any) {
+        } catch (e) {
             throw ZotFlowError.wrap(
                 e,
                 ZotFlowErrorCode.NETWORK_ERROR,
@@ -318,7 +318,7 @@ export class WebDavService {
                     `WebDAV verification failed with status: ${response.status}`,
                 );
             }
-        } catch (e: any) {
+        } catch (e) {
             throw ZotFlowError.wrap(
                 e,
                 ZotFlowErrorCode.NETWORK_ERROR,
