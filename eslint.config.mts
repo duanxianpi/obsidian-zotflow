@@ -130,6 +130,27 @@ export default tseslint.config(
         rules: {
             "obsidianmd/prefer-window-timers": "off",
             "obsidianmd/no-global-this": "off",
+            // Same reason for `fetch`: `requestUrl` is an export of the
+            // `obsidian` module, which resolves to the main thread's runtime
+            // and cannot be imported here — `src/worker` imports it nowhere.
+            // A request that genuinely needs Obsidian's CORS bypass goes over
+            // the bridge instead (`IParentProxy.request`), which is a routing
+            // decision per call site, not something a lint rule can make.
+            // `app` and `localStorage` stay restricted; neither exists in a
+            // worker either, so a hit there is still worth seeing.
+            "no-restricted-globals": [
+                "warn",
+                {
+                    name: "app",
+                    message:
+                        "Avoid using the global app object. Instead use the reference provided by your plugin instance.",
+                },
+                {
+                    name: "localStorage",
+                    message:
+                        "Prefer `App#saveLocalStorage` / `App#loadLocalStorage` functions to write / read localStorage data that's unique to a vault.",
+                },
+            ],
         },
     },
     {
