@@ -181,7 +181,7 @@ export const TemplateTestView: React.FC = () => {
                 comp,
             );
         } else {
-            container.createEl("span", {
+            container.createSpan({
                 text: "Click Render to see output.",
                 cls: "zotflow-template-test-placeholder",
             });

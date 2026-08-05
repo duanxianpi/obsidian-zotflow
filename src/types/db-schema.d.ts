@@ -18,8 +18,12 @@ export interface IDBZoteroKey extends ZoteroKey {
     joinedGroups: number[]; // Array of Group IDs the key has access to
 }
 
-/** Stored Zotero group library metadata. */
-export interface IDBZoteroGroup extends ZoteroGroup {}
+/**
+ * Stored Zotero group library metadata. Named separately from `ZoteroGroup`
+ * because it is the table's row type, but it adds nothing to it today — the
+ * other stored types carry sync bookkeeping the server payload has no room for.
+ */
+export type IDBZoteroGroup = ZoteroGroup;
 
 /** Stored Zotero library with sync version tracking. */
 export interface IDBZoteroLibrary extends ZoteroLibrary {

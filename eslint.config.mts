@@ -1,9 +1,8 @@
-import tseslint from "typescript-eslint";
 import obsidianmd from "eslint-plugin-obsidianmd";
 import globals from "globals";
-import { globalIgnores } from "eslint/config";
+import { defineConfig, globalIgnores } from "eslint/config";
 
-export default tseslint.config(
+export default defineConfig(
     globalIgnores([
         "node_modules",
         "dist",
@@ -107,6 +106,44 @@ export default tseslint.config(
             "@typescript-eslint/no-unnecessary-type-assertion": "off",
             "@typescript-eslint/no-this-alias": "off",
             "obsidianmd/no-tfile-tfolder-cast": "off",
+        },
+    },
+    {
+        // The reader bootstrap reads its own HTML back out of a `blob:` URL
+        // produced by the asset inliner. `requestUrl` speaks http(s) only, so
+        // there is nothing it could do with one. `app` and `localStorage` stay
+        // restricted, as in the worker block below.
+        files: ["src/ui/reader/bridge.ts"],
+        rules: {
+            // The iframe is built on `container.ownerDocument`, which is
+            // already the right window's document whether or not the reader is
+            // popped out. The rule suggests `doc.win.createEl`, but `createEl`
+            // is declared on Element/Document and as a global — never on
+            // `Window` — so its own suggestion does not typecheck.
+            "obsidianmd/prefer-create-el": "off",
+            "no-restricted-globals": [
+                "warn",
+                {
+                    name: "app",
+                    message:
+                        "Avoid using the global app object. Instead use the reference provided by your plugin instance.",
+                },
+                {
+                    name: "localStorage",
+                    message:
+                        "Prefer `App#saveLocalStorage` / `App#loadLocalStorage` functions to write / read localStorage data that's unique to a vault.",
+                },
+            ],
+        },
+    },
+    {
+        // These files build the PDF.js viewer's HTML with `DOMParser`, so the
+        // document they hold is detached and belongs to no window. Obsidian's
+        // `createEl` helpers hang off `Document#win`, which such a document
+        // does not have — the suggested fix would throw at runtime.
+        files: ["src/bundle-assets/**"],
+        rules: {
+            "obsidianmd/prefer-create-el": "off",
         },
     },
     {

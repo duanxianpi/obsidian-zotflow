@@ -405,7 +405,7 @@ describe("saveAnnotation", () => {
         // The base64 PNG belongs in the vault as a file; inlining it would bloat
         // the sidecar without bound.
         await manager.saveAnnotation(
-            anno("IMG1", { type: "image", image: "AAAABBBB" as never }),
+            anno("IMG1", { type: "image", image: "AAAABBBB" }),
         );
 
         const stored = readSidecar().annotations[0];

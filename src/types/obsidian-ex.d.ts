@@ -305,7 +305,7 @@ declare module "obsidian" {
     }
 
     interface MetadataTypeManager {
-        properties: Record<string, any>;
+        properties: Record<string, unknown>;
     }
 
     interface App {
@@ -315,14 +315,31 @@ declare module "obsidian" {
 
         appId: string;
         metadataTypeManager: MetadataTypeManager;
+        viewRegistry: ViewRegistry;
 
         /** Undocumented: reveal a vault path in the system file explorer (desktop only). */
         showInFolder(path: string): void;
     }
 
+    interface ViewRegistry {
+        /**
+         * Undocumented: releases file extensions claimed by another view so
+         * this plugin's own `registerExtensions` can take them over.
+         */
+        unregisterExtensions(extensions: string[]): void;
+    }
+
     interface EmbedRegistry {
         embedByExtension: {
-            md: (args: any, file: TFile, subpath: string) => WidgetEditorView;
+            /**
+             * Undocumented embed creator. Only the two context fields ZotFlow
+             * passes are declared; Obsidian's own callers supply more.
+             */
+            md: (
+                context: { app: App; containerEl: HTMLElement },
+                file: TFile,
+                subpath: string,
+            ) => WidgetEditorView;
         };
     }
 
@@ -354,14 +371,12 @@ declare module "obsidian" {
     interface Commands {
         executeCommandById(commandId: string): void;
 
-        executeCommandById(commandId: string, ...args: any[]): void;
+        executeCommandById(commandId: string, ...args: unknown[]): void;
     }
 
     interface Component {
         _loaded: boolean;
     }
-
-    interface Workspace {}
 
     interface WorkspaceLeaf {
         id: string;
@@ -650,7 +665,36 @@ declare module "obsidian" {
         suggestEl: HTMLElement;
     }
 
+    interface PopoverSuggest<T> {
+        /**
+         * Undocumented: the popover's own suggestion list. `selectedItem` is
+         * the highlighted index into `values`, which is how a keybinding can
+         * act on the entry under the cursor without waiting for a click.
+         */
+        suggestions?: {
+            selectedItem?: number;
+            values?: T[];
+        };
+    }
+
+    // `T` is unused here but cannot be dropped or renamed: merging with
+    // Obsidian's `class EditorSuggest<T>` requires the same parameter name.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for declaration merging
+    interface EditorSuggest<T> {
+        /**
+         * Undocumented: re-runs `onTrigger` against the current cursor. Called
+         * directly so a manually inserted prefix opens the popover in the same
+         * tick, rather than on the user's next keystroke.
+         */
+        trigger(editor: Editor, file: TFile, manual: boolean): void;
+    }
+
     interface Vault {
         getConfig(key: string): string | number | boolean | null;
+        /**
+         * Undocumented: the vault's parsed `app.json`. Only the settings
+         * ZotFlow reads are declared — the file holds many more.
+         */
+        config: { strictLineBreaks?: boolean };
     }
 }

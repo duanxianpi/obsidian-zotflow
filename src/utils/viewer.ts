@@ -4,6 +4,8 @@ import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "../ui/note-editor/view";
 import { workerBridge } from "../bridge";
 import { services } from "../services/services";
 
+import type { ReaderNavigation } from "types/zotero-reader";
+
 /**
  * Open an attachment in the default application.
  * @param libraryID The library ID of the attachment.
@@ -15,7 +17,7 @@ export async function openAttachment(
     libraryID: number,
     key: string,
     app: App,
-    navigationInfo?: any,
+    navigationInfo?: string,
 ) {
     // Update last accessed timestamp
     workerBridge.dbHelper.updateLastAccessed(libraryID, key).catch(() => {
@@ -55,7 +57,7 @@ export async function openAttachment(
 
     if (navigationInfo) {
         (activeLeaf.view as ZoteroReaderView).readerNavigate(
-            JSON.parse(navigationInfo),
+            JSON.parse(navigationInfo) as ReaderNavigation,
         );
     }
 }

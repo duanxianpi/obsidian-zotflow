@@ -32,6 +32,7 @@ function cloneArrayKeys<T>(key: T): T {
 }
 
 for (const method of ["only", "lowerBound", "upperBound", "bound"] as const) {
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- reapplied via .apply below
     const original = IDBKeyRange[method] as (...args: unknown[]) => IDBKeyRange;
     (IDBKeyRange as unknown as Record<string, unknown>)[method] = function (
         ...args: unknown[]
@@ -57,6 +58,21 @@ IDBCursor.prototype.continue = function (key?: IDBValidKey) {
 if (!("onLine" in globalThis.navigator)) {
     Object.defineProperty(globalThis.navigator, "onLine", {
         value: true,
+        configurable: true,
+        writable: true,
+    });
+}
+
+/**
+ * Main-thread code schedules timers as `window.setTimeout` rather than the
+ * bare global, so that a timer started for a popout window is cancellable from
+ * it (`obsidianmd/prefer-window-timers`). Node has no `window`; pointing it at
+ * the global object is what a browser already does, and it keeps
+ * `vi.useFakeTimers()` — which patches the global — in effect.
+ */
+if (!("window" in globalThis)) {
+    Object.defineProperty(globalThis, "window", {
+        value: globalThis,
         configurable: true,
         writable: true,
     });

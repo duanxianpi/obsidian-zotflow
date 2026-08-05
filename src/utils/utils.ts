@@ -14,7 +14,10 @@ export function getNotePath({
     sourceNoteFolder: string;
     libraryName: string;
 }): string {
-    const illegalRe = /[\/?<>\\:*|"]/g;
+    const illegalRe = /[/?<>\\:*|"]/g;
+    // Stripping control characters from a filename is what this function is
+    // for, so the rule is reporting the intent rather than a mistake.
+    // eslint-disable-next-line no-control-regex -- C0 and C1 ranges, deliberate
     const controlRe = /[\x00-\x1f\x80-\x9f]/g;
     const reservedRe = /^\.+$/;
     const windowsReservedRe = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;

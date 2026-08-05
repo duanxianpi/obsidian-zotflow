@@ -612,20 +612,20 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
         }
 
         // Custom Drag Ghost using Obsidian classes
-        const ghost = document.createElement("div");
+        const ghost = createDiv();
         ghost.addClass("drag-ghost");
 
-        const self = document.createElement("div");
+        const self = createDiv();
         self.addClass("drag-ghost-self");
 
         setIcon(self, iconName || "file");
 
-        const titleSpan = document.createElement("span");
+        const titleSpan = createSpan();
         titleSpan.textContent = node.data.name || "Untitled";
 
         self.appendChild(titleSpan);
 
-        const action = document.createElement("div");
+        const action = createDiv();
         action.addClass("drag-ghost-action");
         action.textContent = isCitationDrag
             ? "Insert citation here"

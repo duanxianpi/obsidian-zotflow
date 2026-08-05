@@ -16,9 +16,14 @@ import type {
     ColorScheme,
     CreateReaderOptions,
     CustomReaderTheme,
+    ReaderNavigation,
 } from "types/zotero-reader";
 import type { ITaskInfo } from "types/tasks";
-import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import {
+    ZotFlowError,
+    ZotFlowErrorCode,
+    errorMessage as describeError,
+} from "utils/error";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 
 /** View type identifier for the Zotero cloud reader view. */
@@ -452,7 +457,7 @@ export class ZoteroReaderView extends ItemView {
                     "Failed to extract external annotations",
                 );
             }
-        } catch (e: any) {
+        } catch (e) {
             services.logService.error(
                 "Error loading Zotero Reader view",
                 "ZoteroReaderView",
@@ -462,14 +467,14 @@ export class ZoteroReaderView extends ItemView {
             const errorMessage = container.createDiv({
                 cls: "error-message",
             });
+            errorMessage.createDiv().setText("Failed to load Zotero Reader");
             errorMessage
-                .createEl("div")
-                .setText("Failed to load Zotero Reader");
-            errorMessage.createEl("div").setText("Error details: " + e.message);
+                .createDiv()
+                .setText("Error details: " + describeError(e));
         }
     }
 
-    readerNavigate(navigationInfo: any) {
+    readerNavigate(navigationInfo: ReaderNavigation) {
         if (!this.bridge) return;
 
         ff(

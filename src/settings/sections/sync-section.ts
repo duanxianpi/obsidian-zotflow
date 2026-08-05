@@ -1,6 +1,7 @@
 import { Setting, ButtonComponent, setIcon, SettingGroup } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
+import { errorMessage as describeError } from "utils/error";
 
 import type ZotFlow from "main";
 import type { LibrarySyncMode } from "settings/types";
@@ -39,7 +40,7 @@ export class SyncSection {
             descDiv.createSpan({ text: "." });
         }
         // API Key Input
-        settingGroup.addSetting(async (setting) => {
+        settingGroup.addSetting((setting) => {
             setting
                 .setName("API Key")
                 .setDesc(apiDescContainer)
@@ -135,6 +136,10 @@ export class SyncSection {
 
         // Libraries Table
         if (keyInfo) {
+            // Must stay async: the table is built by awaiting inside the
+            // callback. Obsidian types `addSetting` as taking a `void`
+            // callback, but matching that type here hard-freezes the app.
+            // eslint-disable-next-line @typescript-eslint/no-misused-promises -- see above
             settingGroup.addSetting(async (setting) => {
                 setting.setName("Library Synchronization");
                 setting.setDesc("Manage the sync settings for each library.");
@@ -236,10 +241,12 @@ export class SyncSection {
             });
 
             select.value = this.plugin.settings.librariesConfig[lib.id]!.mode;
-            select.addEventListener("change", async () => {
+            select.addEventListener("change", () => {
                 this.plugin.settings.librariesConfig[lib.id]!.mode =
                     select.value as LibrarySyncMode;
-                await this.plugin.saveSettings();
+                // Nothing awaits a DOM event handler, so the save is marked
+                // rather than awaited.
+                void this.plugin.saveSettings();
             });
         });
 
@@ -284,7 +291,7 @@ export class SyncSection {
             await this.plugin.saveSettings();
 
             this.refreshUI();
-        } catch (error: any) {
+        } catch (error) {
             services.logService.error(
                 `Zotero API ${mode} failed`,
                 "Settings",
@@ -292,7 +299,7 @@ export class SyncSection {
             );
             services.notificationService.notify(
                 "error",
-                `Error: ${error.message}`,
+                `Error: ${describeError(error)}`,
             );
             if (mode === "verify") {
                 this.plugin.settings.librariesConfig = {};

@@ -130,8 +130,8 @@ export const TelemetryView: React.FC = () => {
             setLogs([...services.logService.logs]);
         };
         refresh();
-        const interval = setInterval(refresh, 1_000);
-        return () => clearInterval(interval);
+        const interval = window.setInterval(refresh, 1_000);
+        return () => window.clearInterval(interval);
     }, []);
 
     const filteredLogs = logs.filter((entry) => {

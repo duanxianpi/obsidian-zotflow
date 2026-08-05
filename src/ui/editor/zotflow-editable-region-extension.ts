@@ -143,7 +143,8 @@ const DEBOUNCE_DELAY = 2000;
 
 const editableRegionSyncPlugin = ViewPlugin.fromClass(
     class {
-        private debouncers = new Map<string, ReturnType<typeof setTimeout>>();
+        /** Values are `window.setTimeout` handles — numbers, not Node's `Timeout`. */
+        private debouncers = new Map<string, number>();
 
         update(update: ViewUpdate) {
             if (!update.docChanged) return;
@@ -209,10 +210,10 @@ const editableRegionSyncPlugin = ViewPlugin.fromClass(
             // Clear previous timer for this region
             const existing = this.debouncers.get(debounceKey);
             if (existing !== undefined) {
-                clearTimeout(existing);
+                window.clearTimeout(existing);
             }
 
-            const timer = setTimeout(() => {
+            const timer = window.setTimeout(() => {
                 this.debouncers.delete(debounceKey);
 
                 if (region.type === "NOTE") {
@@ -298,7 +299,7 @@ const editableRegionSyncPlugin = ViewPlugin.fromClass(
 
         destroy() {
             for (const timer of this.debouncers.values()) {
-                clearTimeout(timer);
+                window.clearTimeout(timer);
             }
             this.debouncers.clear();
         }

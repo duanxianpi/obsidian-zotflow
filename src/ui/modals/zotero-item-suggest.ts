@@ -182,7 +182,10 @@ export class ZoteroItemSuggest {
         // Author • Year
         const metaEl = bottomRow.createDiv({ cls: "zotflow-meta" });
         const authors = this.formatCreators(zItem.searchCreators);
-        const year = this.extractYear((zItem.raw.data as any).date);
+        // Only some Zotero item types carry `date`, so it is read off the
+        // union rather than assumed present.
+        const { date } = zItem.raw.data as { date?: string };
+        const year = this.extractYear(date ?? "");
 
         let metaText = "";
         if (authors && year !== "n.d.") metaText = `${authors} (${year}).`;

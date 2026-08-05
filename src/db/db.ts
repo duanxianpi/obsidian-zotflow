@@ -1,6 +1,6 @@
 import Dexie from "dexie";
 
-import type { Table } from "dexie";
+import type { IndexableTypePart, Table } from "dexie";
 import type {
     IDBZoteroFile,
     IDBZoteroCollection,
@@ -105,8 +105,10 @@ export class ZotFlowDB extends Dexie {
  * @param arrays The input array of arrays, e.g. [[1, 2], ['a', 'b']]
  * @returns All possible combinations
  */
-export function getCombinations(arrays: any[][]) {
-    return arrays.reduce(
+export function getCombinations(
+    arrays: IndexableTypePart[][],
+): IndexableTypePart[][] {
+    return arrays.reduce<IndexableTypePart[][]>(
         (acc, currList) => {
             return acc.flatMap((prevCombination) => {
                 return currList.map((item) => {

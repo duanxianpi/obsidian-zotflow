@@ -5,6 +5,7 @@ import type {
     ColorScheme,
     ChildEvents,
     AnnotationJSON,
+    ReaderNavigation,
 } from "types/zotero-reader";
 
 import { EditorView } from "@codemirror/view";
@@ -45,6 +46,11 @@ type DirectBridgeBootstrap = () => {
     token: string;
     parent: ParentAPI;
     register: (childAPI: ChildAPI, token: string) => Promise<{ ok: boolean }>;
+};
+
+/** The child realm, while the bootstrap is parked on it. */
+type BridgeChildWindow = Window & {
+    __OBSIDIAN_BRIDGE__?: DirectBridgeBootstrap;
 };
 
 /** Penpal-based state machine managing the reader iframe lifecycle and bidirectional RPC. */
@@ -162,7 +168,14 @@ export class IframeReaderBridge {
             },
 
             getMathJaxConfig: () => {
-                return (window as any).MathJax?.config || {};
+                // Obsidian loads MathJax onto the window; it is absent until the
+                // first formula renders.
+                const mathJax = (
+                    window as {
+                        MathJax?: { config?: Record<string, unknown> };
+                    }
+                ).MathJax;
+                return mathJax?.config ?? {};
             },
 
             getColorScheme: () => {
@@ -178,7 +191,10 @@ export class IframeReaderBridge {
                 return services.settings;
             },
 
-            getLinkToSelection: (text: string, navigationInfo: any) => {
+            getLinkToSelection: (
+                text: string,
+                navigationInfo: ReaderNavigation,
+            ) => {
                 if (this.isLocal && this.localAttachment) {
                     const note = getLinkedLocalSourceNote(
                         services.app,
@@ -338,7 +354,7 @@ export class IframeReaderBridge {
                 options: Partial<MarkdownEditorProps>,
             ) => {
                 const editor = createEmbeddableMarkdownEditor(
-                    (window as any).app,
+                    services.app,
                     container,
                     {
                         ...options,
@@ -405,6 +421,10 @@ export class IframeReaderBridge {
         // counts loads of THIS element only.
         this.iframeLoadCount = 0;
         const doc = this.container.ownerDocument; // Get the document of the container
+        // `doc` is already the container's own document, popped-out or not, so
+        // this creates the iframe in the right window. The rule's suggested
+        // `doc.win.createEl` is not on Obsidian's `Window` type at all — see
+        // the carve-out in eslint.config.mts.
         this.iframe = doc.createElement("iframe");
         this.iframe.id = "zotero-reader-iframe";
         this.iframe.setCssStyles({
@@ -415,6 +435,9 @@ export class IframeReaderBridge {
         const src = getBlobUrls()["reader.html"]!;
 
         if (Platform.isAndroidApp) {
+            // `src` is a `blob:` URL built by the asset inliner, not a network
+            // address. `requestUrl` only speaks http(s) and cannot read one —
+            // see the `no-restricted-globals` carve-out in eslint.config.mts.
             const srcdoc = await fetch(src).then((res) => res.text());
             this.iframe.srcdoc = srcdoc;
         } else {
@@ -481,7 +504,7 @@ export class IframeReaderBridge {
                     "IframeReaderBridge",
                 );
                 // Deferred so the reconnect never runs inside the load handler.
-                setTimeout(() => {
+                window.setTimeout(() => {
                     void this.reconnect().catch((e: unknown) => {
                         services.logService.error(
                             "Reconnection after iframe reload failed",
@@ -534,7 +557,7 @@ export class IframeReaderBridge {
                         });
                         // Make it non-enumerable & configurable (child can delete after use)
                         Object.defineProperty(
-                            this.iframe.contentWindow as any,
+                            this.iframe.contentWindow,
                             "__OBSIDIAN_BRIDGE__",
                             {
                                 value: _bridge,
@@ -553,7 +576,7 @@ export class IframeReaderBridge {
         await Promise.race([
             remotePromise,
             new Promise<never>((_, rej) =>
-                setTimeout(
+                window.setTimeout(
                     () => rej(new Error("Child connect timeout")),
                     this.connectTimeoutMs,
                 ),
@@ -565,7 +588,7 @@ export class IframeReaderBridge {
         await Promise.race([
             readyPromise,
             new Promise<never>((_, rej) =>
-                setTimeout(
+                window.setTimeout(
                     () => rej(new Error("Child connect timeout")),
                     this.connectTimeoutMs,
                 ),
@@ -686,7 +709,7 @@ export class IframeReaderBridge {
         });
     }
 
-    navigate(navigationInfo: any) {
+    navigate(navigationInfo: ReaderNavigation) {
         return this.runAfterReaderReady(async () => {
             await this.child!.navigate(navigationInfo);
         });
@@ -710,9 +733,14 @@ export class IframeReaderBridge {
 
         try {
             if (this.iframe?.contentWindow) {
-                delete (this.iframe.contentWindow as any).__OBSIDIAN_BRIDGE__;
+                delete (this.iframe.contentWindow as BridgeChildWindow)
+                    .__OBSIDIAN_BRIDGE__;
             }
-        } catch {}
+        } catch {
+            // The iframe may already be cross-origin or torn down, which makes
+            // reaching into `contentWindow` throw. Nothing here needs it to
+            // succeed — the handle is being dropped either way.
+        }
         this.child = undefined;
         this.iframe?.remove();
         this.iframe = null;

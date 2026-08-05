@@ -23,6 +23,7 @@ import {
 import { ZOTERO_READER_VIEW_TYPE, ZoteroReaderView } from "./ui/reader/view";
 import { TREE_VIEW_TYPE, ZotFlowTreeView } from "./ui/tree-view/view";
 import { services } from "./services/services";
+import { errorMessage as describeError } from "utils/error";
 import { ZotFlowLockExtension } from "ui/editor/zotflow-lock-extension";
 import { ZotFlowEditableRegionExtension } from "ui/editor/zotflow-editable-region-extension";
 import { handleEditorDrop } from "ui/editor/citation-helper";
@@ -157,7 +158,6 @@ export default class ZotFlow extends Plugin {
 
         if (this.settings.overwriteViewer) {
             try {
-                // @ts-expect-error Undocumented Obsidian API: unregisterExtensions()
                 this.app.viewRegistry.unregisterExtensions(
                     SUPPORTED_EXTENSIONS,
                 );
@@ -166,7 +166,7 @@ export default class ZotFlow extends Plugin {
                     LOCAL_ZOTERO_READER_VIEW_TYPE,
                 );
             } catch {
-                const message = `Could not unregister extension: '${SUPPORTED_EXTENSIONS}'`;
+                const message = `Could not unregister extension: '${SUPPORTED_EXTENSIONS.join(", ")}'`;
                 services.logService.error(message, "Main");
                 // services.notificationService.notify("error", message);
             }
@@ -192,7 +192,7 @@ export default class ZotFlow extends Plugin {
         void MarkdownRenderer.render(
             this.app,
             "$\\int$",
-            document.createElement("div"),
+            createDiv(),
             "",
             tempComponent,
         );
@@ -219,7 +219,7 @@ export default class ZotFlow extends Plugin {
 
         this.addCommand({
             id: "open-activity-center",
-            name: "Open ZotFlow Activity Center",
+            name: "Open Activity Center",
             callback: () => {
                 new ActivityCenterModal(this.app).open();
             },
@@ -344,8 +344,8 @@ export default class ZotFlow extends Plugin {
 
                 const cache = this.app.metadataCache.getFileCache(view.file);
                 const fm = cache?.frontmatter;
-                const zoteroKey = fm?.["zotero-key"];
-                const libraryID = fm?.["library-id"];
+                const zoteroKey: unknown = fm?.["zotero-key"];
+                const libraryID: unknown = fm?.["library-id"];
 
                 if (
                     typeof zoteroKey !== "string" ||
@@ -405,7 +405,7 @@ export default class ZotFlow extends Plugin {
                 } catch (e) {
                     services.notificationService.notify(
                         "error",
-                        `Failed to start task: ${e}`,
+                        `Failed to start task: ${String(e)}`,
                     );
                     services.logService.error(
                         "Failed to start test task",
@@ -664,7 +664,7 @@ export default class ZotFlow extends Plugin {
                     `Unknown action type: ${type}`,
                 );
             }
-        } catch (error: any) {
+        } catch (error) {
             services.logService.log(
                 "error",
                 "Error handling zotflow protocol call",
@@ -675,7 +675,7 @@ export default class ZotFlow extends Plugin {
             // Handle typed errors from Worker
             services.notificationService.notify(
                 "error",
-                `Protocol Error: ${error.message || "Unknown error"}`,
+                `Protocol Error: ${describeError(error) || "Unknown error"}`,
             );
         }
     }
@@ -770,9 +770,9 @@ export default class ZotFlow extends Plugin {
         const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
         if (!fm) return;
 
-        const zoteroKey = fm["zotero-key"];
-        const libraryID = fm["library-id"];
-        const localAttachment = fm["zotflow-local-attachment"];
+        const zoteroKey: unknown = fm["zotero-key"];
+        const libraryID: unknown = fm["library-id"];
+        const localAttachment: unknown = fm["zotflow-local-attachment"];
 
         const isLibrarySourceNote =
             typeof zoteroKey === "string" && typeof libraryID === "number";
@@ -980,9 +980,9 @@ export default class ZotFlow extends Plugin {
         const cache = this.app.metadataCache.getFileCache(file);
         const fm = cache?.frontmatter;
 
-        const zoteroKey = fm?.["zotero-key"];
-        const libraryID = fm?.["library-id"];
-        const localAttachment = fm?.["zotflow-local-attachment"];
+        const zoteroKey: unknown = fm?.["zotero-key"];
+        const libraryID: unknown = fm?.["library-id"];
+        const localAttachment: unknown = fm?.["zotflow-local-attachment"];
 
         const isLibrarySourceNote =
             typeof zoteroKey === "string" && typeof libraryID === "number";
@@ -1133,7 +1133,7 @@ export default class ZotFlow extends Plugin {
                         },
                     };
 
-                    setTimeout(() => {
+                    window.setTimeout(() => {
                         if (leaf.view instanceof MarkdownView) {
                             ff(
                                 leaf.setViewState(newState),

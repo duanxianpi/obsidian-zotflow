@@ -83,9 +83,12 @@ export class IndexService {
     public indexFile(file: TFile) {
         // Get data from cache, do not await read()
         const cache = this.app.metadataCache.getFileCache(file);
-        const zoteroKey = cache?.frontmatter?.["zotero-key"];
+        // Frontmatter is whatever the user typed, so the value has to be
+        // checked rather than trusted — a numeric key would otherwise be
+        // stored under a key nothing can look up.
+        const zoteroKey: unknown = cache?.frontmatter?.["zotero-key"];
 
-        if (zoteroKey) {
+        if (typeof zoteroKey === "string" && zoteroKey) {
             this.keyToFileMap.set(zoteroKey, file);
         }
     }

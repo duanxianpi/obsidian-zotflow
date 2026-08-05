@@ -1,6 +1,7 @@
 import { Setting, SettingGroup } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
+import { errorMessage as describeError } from "utils/error";
 
 import type ZotFlow from "main";
 
@@ -134,7 +135,7 @@ export class WebDavSection {
                                 await this.plugin.saveSettings();
 
                                 this.refreshUI();
-                            } catch (error: any) {
+                            } catch (error) {
                                 services.logService.error(
                                     "WebDAV verification failed",
                                     "Settings",
@@ -142,7 +143,7 @@ export class WebDavSection {
                                 );
                                 services.notificationService.notify(
                                     "error",
-                                    `Connection failed: ${error.message}`,
+                                    `Connection failed: ${describeError(error)}`,
                                 );
                                 button
                                     .setButtonText("Verify & Connect")

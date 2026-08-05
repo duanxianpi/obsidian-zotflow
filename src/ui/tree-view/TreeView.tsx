@@ -375,7 +375,7 @@ export const ZotFlowTree = () => {
     }, []);
 
     // Prevent react-dnd from interfering with global events
-    const voidElement = useMemo(() => document.createElement("div"), []);
+    const voidElement = useMemo(() => createDiv(), []);
 
     const handleRefresh = async () => {
         try {

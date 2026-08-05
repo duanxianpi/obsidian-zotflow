@@ -107,7 +107,12 @@ export class FakeObsidianApp {
     /** Every mutating vault call, in order. */
     readonly vaultCalls: string[] = [];
     /** Paths sent to the system trash and the local trash, separately. */
-    readonly trashed = { system: [] as string[], local: [] as string[] };
+    readonly trashed = {
+        system: [] as string[],
+        local: [] as string[],
+        /** Sent via `fileManager.trashFile`, which picks the bin itself. */
+        preferred: [] as string[],
+    };
     /** Every `fileManager.generateMarkdownLink` call, in order. */
     readonly generatedLinks: { path: string; alias?: string }[] = [];
 
@@ -197,6 +202,7 @@ export class FakeObsidianApp {
         this.vaultCalls.length = 0;
         this.trashed.system.length = 0;
         this.trashed.local.length = 0;
+        this.trashed.preferred.length = 0;
         return this;
     }
 
@@ -452,6 +458,20 @@ export class FakeObsidianApp {
 
     get fileManager() {
         return {
+            /**
+             * Obsidian sends the file to the system bin, to `.trash/`, or
+             * straight out depending on the vault's own setting. The fake has
+             * no such setting and does not pretend to — a test asserting which
+             * bin would be asserting the one thing this API hides from callers.
+             */
+            trashFile: (file: TFile) => {
+                this.vaultCalls.push(`trashFile:${file.path}`);
+                this.trashed.preferred.push(file.path);
+                this.files.delete(file.path);
+                this.tfiles.delete(file.path);
+                return Promise.resolve();
+            },
+
             /**
              * Obsidian builds either a wikilink or a markdown link depending on
              * vault settings; the fake always emits the wikilink form, which is

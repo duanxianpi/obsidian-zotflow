@@ -70,6 +70,21 @@ export type ChildEvents =
     | { type: "setLightTheme"; theme: unknown }
     | { type: "setDarkTheme"; theme: unknown };
 
+/**
+ * A place in the document, in both directions: the reader hands one out for
+ * the current selection, and the parent hands one back to move the reader.
+ *
+ * Only the fields ZotFlow itself reads or writes are named. The rest of the
+ * object is Zotero's, and it also arrives verbatim from the `navigation`
+ * parameter of a `zotflow://open-attachment` link, so the shape is open.
+ */
+export interface ReaderNavigation {
+    annotationID?: string;
+    pageLabel?: string;
+    position?: ZoteroPosition;
+    [key: string]: unknown;
+}
+
 /** Penpal API exposed by the parent (Obsidian) to the reader iframe. */
 export type ParentAPI = {
     getBlobUrlMap: () => Record<string, string>;
@@ -77,11 +92,15 @@ export type ParentAPI = {
     isAndroidApp: () => boolean;
     isLocalReader: () => boolean;
     getOrigin: () => string;
-    getMathJaxConfig: () => any;
+    /** Obsidian's own MathJax configuration, handed to the reader verbatim. */
+    getMathJaxConfig: () => Record<string, unknown>;
     getStyleSheets: () => StyleSheetList;
     getColorScheme: () => ColorScheme;
     getPluginSettings: () => ZotFlowSettings;
-    getLinkToSelection: (text: string, navigationInfo: any) => string;
+    getLinkToSelection: (
+        text: string,
+        navigationInfo: ReaderNavigation,
+    ) => string;
     handleSetDataTransferAnnotations: (
         dataTransfer: DataTransfer,
         annotations: AnnotationJSON[],
@@ -107,7 +126,7 @@ export type ChildAPI = {
     setColorScheme: (colorScheme: ColorScheme) => Promise<boolean>;
     addAnnotation: (annotation: AnnotationJSON) => Promise<boolean>;
     refreshAnnotations: (annotations: AnnotationJSON[]) => Promise<boolean>;
-    navigate: (navigationInfo: any) => Promise<boolean>;
+    navigate: (navigationInfo: ReaderNavigation) => Promise<boolean>;
     destroy: () => Promise<boolean>;
 };
 

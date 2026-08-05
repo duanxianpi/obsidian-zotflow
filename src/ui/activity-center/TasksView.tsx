@@ -206,9 +206,7 @@ const HistoryItem: React.FC<{
                                 Error:
                             </span>{" "}
                             <div className="zotflow-history-json zotflow-history-json-error">
-                                <code>
-                                    {formatDetailsJson(task.error as any)}
-                                </code>
+                                <code>{task.error}</code>
                             </div>
                         </div>
                     )}

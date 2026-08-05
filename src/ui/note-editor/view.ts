@@ -29,7 +29,8 @@ export class NoteEditorView extends ItemView {
     private editor?: EmbeddableMarkdownEditor;
     /** Stripped `<!-- ZF_NOTE_META ... -->` line to re-inject on save. */
     private metaLine = "";
-    private saveTimer?: ReturnType<typeof setTimeout>;
+    /** `window.setTimeout` handle — a number, unlike Node's `Timeout`. */
+    private saveTimer?: number;
     private unsubscribeTaskMonitor?: () => void;
     private unsubscribeNoteChanged?: () => void;
     private lastSyncStatuses = new Map<string, string>();
@@ -157,9 +158,9 @@ export class NoteEditorView extends ItemView {
      */
     private scheduleSave() {
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
         }
-        this.saveTimer = setTimeout(() => {
+        this.saveTimer = window.setTimeout(() => {
             this.saveTimer = undefined;
             ff(this.saveContent(), "Failed to save the note");
         }, SAVE_DEBOUNCE_MS);
@@ -265,7 +266,7 @@ export class NoteEditorView extends ItemView {
 
         // Flush pending saves before overwriting with synced content
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
             this.saveTimer = undefined;
             await this.saveContent();
         }
@@ -294,7 +295,7 @@ export class NoteEditorView extends ItemView {
 
     private destroyEditor() {
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
             this.saveTimer = undefined;
         }
         if (this.editor) {
@@ -310,7 +311,7 @@ export class NoteEditorView extends ItemView {
         this.unsubscribeNoteChanged = undefined;
         // Flush any pending save before closing
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
             this.saveTimer = undefined;
             await this.saveContent();
         }
