@@ -6,6 +6,7 @@
  * upgrades rather than a hand-written stand-in.
  */
 import "fake-indexeddb/auto";
+import { setProxiedFetch } from "worker/proxied-fetch";
 
 /**
  * Workaround for a fake-indexeddb deviation from the IndexedDB spec.
@@ -77,3 +78,5 @@ if (!("window" in globalThis)) {
         writable: true,
     });
 }
+
+setProxiedFetch((url, init) => fetch(url, init));

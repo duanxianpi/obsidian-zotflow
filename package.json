@@ -48,6 +48,8 @@
         "webpack-cli": "^7.2.2"
     },
     "dependencies": {
+        "@codemirror/state": "6.5.0",
+        "@codemirror/view": "6.38.6",
         "@leeoniya/ufuzzy": "^1.0.19",
         "@types/nunjucks": "^3.2.6",
         "citeproc": "^2.4.63",

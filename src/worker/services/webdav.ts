@@ -1,6 +1,7 @@
 import type { IParentProxy } from "bridge/types";
 import type { ZotFlowSettings } from "settings/types";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import { proxiedFetch } from "worker/proxied-fetch";
 
 /** WebDAV file download service for fetching Zotero attachments from a user-configured server. */
 export class WebDavService {
@@ -77,7 +78,7 @@ export class WebDavService {
                 },
             );
 
-            const response = await fetch(fullUrl, req);
+            const response = await proxiedFetch(fullUrl, req);
             const responseMs = Date.now() - startedAt;
             this.parentHost.log(
                 "debug",
@@ -211,7 +212,7 @@ export class WebDavService {
         );
 
         try {
-            const response = await fetch(fullUrl, {
+            const response = await proxiedFetch(fullUrl, {
                 method: "HEAD",
                 headers: {
                     Authorization: `Basic ${credentials}`,
@@ -292,7 +293,7 @@ export class WebDavService {
                 throw: false,
             };
 
-            const response = await fetch(url, req);
+            const response = await proxiedFetch(url, req);
 
             if (response.status >= 200 && response.status < 300) {
                 return true;

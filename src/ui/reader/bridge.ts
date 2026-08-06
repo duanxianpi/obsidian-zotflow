@@ -438,7 +438,7 @@ export class IframeReaderBridge {
             // `src` is a `blob:` URL built by the asset inliner, not a network
             // address. `requestUrl` only speaks http(s) and cannot read one —
             // see the `no-restricted-globals` carve-out in eslint.config.mts.
-            const srcdoc = await fetch(src).then((res) => res.text());
+            const srcdoc = await doc.win.fetch(src).then((res) => res.text());
             this.iframe.srcdoc = srcdoc;
         } else {
             this.iframe.src = src;

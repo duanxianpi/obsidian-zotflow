@@ -167,7 +167,7 @@ const exposedApi: WorkerAPI = {
         // Patch global fetch to proxy through Obsidian Main Thread
         // The worker global has no `originalFetch`; we are adding it so the
         // proxy can be unwound.
-        const workerGlobal = globalThis as unknown as {
+        const workerGlobal = self as unknown as {
             fetch: unknown;
             originalFetch?: unknown;
         };

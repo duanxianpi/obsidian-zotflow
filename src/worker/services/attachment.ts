@@ -2,6 +2,7 @@
 import { unzip } from "fflate";
 import { db } from "db/db";
 import SparkMD5 from "spark-md5";
+import { proxiedFetch } from "worker/proxied-fetch";
 import { WebDavService } from "./webdav";
 import { ZoteroAPIService } from "./zotero";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
@@ -814,7 +815,7 @@ export class AttachmentService {
         item: IDBZoteroItem<AttachmentData>,
     ): Promise<ArrayBuffer> {
         try {
-            const response = await fetch(
+            const response = await proxiedFetch(
                 `https://api.zotero.org/${item.raw.library.type}s/${item.libraryID}/items/${item.key}/file`,
                 {
                     headers: {

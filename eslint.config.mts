@@ -81,10 +81,6 @@ export default defineConfig(
         },
     },
     {
-        // The reader bootstrap reads its own HTML back out of a `blob:` URL
-        // produced by the asset inliner. `requestUrl` speaks http(s) only, so
-        // there is nothing it could do with one. `app` and `localStorage` stay
-        // restricted, as in the worker block below.
         files: ["src/ui/reader/bridge.ts"],
         rules: {
             // The iframe is built on `container.ownerDocument`, which is
@@ -93,19 +89,6 @@ export default defineConfig(
             // is declared on Element/Document and as a global — never on
             // `Window` — so its own suggestion does not typecheck.
             "obsidianmd/prefer-create-el": "off",
-            "no-restricted-globals": [
-                "warn",
-                {
-                    name: "app",
-                    message:
-                        "Avoid using the global app object. Instead use the reference provided by your plugin instance.",
-                },
-                {
-                    name: "localStorage",
-                    message:
-                        "Prefer `App#saveLocalStorage` / `App#loadLocalStorage` functions to write / read localStorage data that's unique to a vault.",
-                },
-            ],
         },
     },
     {
@@ -116,50 +99,6 @@ export default defineConfig(
         files: ["src/bundle-assets/**"],
         rules: {
             "obsidianmd/prefer-create-el": "off",
-        },
-    },
-    {
-        // `@codemirror/state` and `@codemirror/view` reach these files through
-        // Obsidian's own dependency tree and are esbuild externals at build
-        // time — the same reason the `tests/` block below gives. Declaring them
-        // directly would pin a second copy the plugin never runs against.
-        files: ["src/ui/editor/**", "src/ui/reader/**", "src/types/**"],
-        rules: {
-            "import/no-extraneous-dependencies": "off",
-        },
-    },
-    {
-        // `src/worker` is bundled and started as a real Web Worker
-        // (`new Worker(...)` in bridge/index.ts), so `window` does not exist
-        // there at all. Both of these rules are about main-thread popout
-        // windows, and `prefer-window-timers` autofixes to `window.setTimeout`
-        // — applying it here would leave lint clean and break the worker at
-        // runtime with a ReferenceError.
-        files: ["src/worker/**"],
-        rules: {
-            "obsidianmd/prefer-window-timers": "off",
-            "obsidianmd/no-global-this": "off",
-            // Same reason for `fetch`: `requestUrl` is an export of the
-            // `obsidian` module, which resolves to the main thread's runtime
-            // and cannot be imported here — `src/worker` imports it nowhere.
-            // A request that genuinely needs Obsidian's CORS bypass goes over
-            // the bridge instead (`IParentProxy.request`), which is a routing
-            // decision per call site, not something a lint rule can make.
-            // `app` and `localStorage` stay restricted; neither exists in a
-            // worker either, so a hit there is still worth seeing.
-            "no-restricted-globals": [
-                "warn",
-                {
-                    name: "app",
-                    message:
-                        "Avoid using the global app object. Instead use the reference provided by your plugin instance.",
-                },
-                {
-                    name: "localStorage",
-                    message:
-                        "Prefer `App#saveLocalStorage` / `App#loadLocalStorage` functions to write / read localStorage data that's unique to a vault.",
-                },
-            ],
         },
     },
     {

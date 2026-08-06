@@ -6,6 +6,11 @@ import type { AnnotationJSON } from "types/zotero-reader";
 import type { TFileWithoutParentAndVault } from "types/zotflow";
 import { errorMessage, ZotFlowError, ZotFlowErrorCode } from "utils/error";
 import {
+    workerClearTimeout,
+    workerSetTimeout,
+    type WorkerTimeout,
+} from "worker/timers";
+import {
     extractPersistRegions,
     reinsertPersistRegions,
     type PersistExtract,
@@ -19,12 +24,12 @@ const ZOTFLOW_REGEX =
 
 /** CRUD service for local vault file notes (PDF/EPUB opened locally). */
 export class LocalNoteService {
-    private debouncers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+    private debouncers: Map<string, WorkerTimeout> = new Map();
 
     // Notes that gained orphaned persist regions since the last Notice
     // (same aggregation pattern as LibraryNoteService).
     private orphanReports: Map<string, string[]> = new Map();
-    private orphanNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+    private orphanNoticeTimer: WorkerTimeout | null = null;
 
     constructor(
         private settings: ZotFlowSettings,
@@ -50,11 +55,11 @@ export class LocalNoteService {
      */
     public dispose() {
         for (const timer of this.debouncers.values()) {
-            clearTimeout(timer);
+            workerClearTimeout(timer);
         }
         this.debouncers.clear();
         if (this.orphanNoticeTimer !== null) {
-            clearTimeout(this.orphanNoticeTimer);
+            workerClearTimeout(this.orphanNoticeTimer);
             this.orphanNoticeTimer = null;
         }
     }
@@ -72,9 +77,9 @@ export class LocalNoteService {
         this.orphanReports.set(path, orphanIds);
 
         if (this.orphanNoticeTimer !== null) {
-            clearTimeout(this.orphanNoticeTimer);
+            workerClearTimeout(this.orphanNoticeTimer);
         }
-        this.orphanNoticeTimer = setTimeout(() => {
+        this.orphanNoticeTimer = workerSetTimeout(() => {
             this.orphanNoticeTimer = null;
             const noteCount = this.orphanReports.size;
             this.orphanReports.clear();
@@ -158,7 +163,7 @@ export class LocalNoteService {
         // Debounced execution
         const debounceId = localAttachment.path;
         if (this.debouncers.has(debounceId)) {
-            clearTimeout(this.debouncers.get(debounceId));
+            workerClearTimeout(this.debouncers.get(debounceId));
             this.debouncers.delete(debounceId);
         }
 
@@ -177,7 +182,7 @@ export class LocalNoteService {
         };
         // The body handles its own failures, so the promise is deliberately
         // not awaited by the timer.
-        const timer = setTimeout(() => void run(), 2000);
+        const timer = workerSetTimeout(() => void run(), 2000);
 
         this.debouncers.set(debounceId, timer);
     }

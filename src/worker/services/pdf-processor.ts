@@ -110,7 +110,7 @@ function isSaveRenderedAnnotationRequest(
 }
 
 function getOriginalFetch(): typeof fetch {
-    const workerGlobal = globalThis as typeof globalThis & {
+    const workerGlobal = self as typeof self & {
         originalFetch?: unknown;
     };
     if (typeof workerGlobal.originalFetch !== "function") {
