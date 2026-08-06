@@ -216,6 +216,47 @@ export class GeneralSection {
                 });
         });
 
+        const localStorageGroup = new SettingGroup(containerEl);
+        localStorageGroup.setHeading("Local Storage");
+
+        localStorageGroup.addSetting((setting) => {
+            setting
+                .setName("Use Zotero Local Storage")
+                .setDesc(
+                    "Load attachments from the local Zotero storage directory instead of " +
+                    "downloading from the Zotero sync service. Only works on desktop " +
+                    "(requires filesystem access). On mobile, attachments are always " +
+                    "loaded from the sync service.",
+                )
+                .addToggle((toggle) => {
+                    toggle.setValue(this.plugin.settings.useZoteroStorage);
+                    toggle.onChange(async (value) => {
+                        this.plugin.settings.useZoteroStorage = value;
+                        await this.plugin.saveSettings();
+                    });
+                });
+        });
+
+        localStorageGroup.addSetting((setting) => {
+            setting
+                .setName("Zotero Storage Path")
+                .setDesc(
+                    "Absolute path to the Zotero storage folder " +
+                    "(e.g. C:\\Users\\david\\Zotero\\storage on Windows, " +
+                    "/Users/david/Zotero/storage on macOS, " +
+                    "~/Zotero/storage on Linux). Required when local storage is enabled.",
+                )
+                .addText((text) => {
+                    text.setPlaceholder("e.g. C:\\Users\\david\\Zotero\\storage")
+                        .setValue(this.plugin.settings.zoteroStoragePath)
+                        .onChange(async (value) => {
+                            this.plugin.settings.zoteroStoragePath = value;
+                            await this.plugin.saveSettings();
+                        });
+                    text.inputEl.size = 40;
+                });
+        });
+
         const generalSettingGroup = new SettingGroup(containerEl);
         generalSettingGroup.setHeading("General Settings");
 
