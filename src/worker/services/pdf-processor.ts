@@ -1,13 +1,7 @@
 /*
  * Ported from Zotero's `chrome/content/zotero/xpcom/pdfWorker/manager.js`
- * (AGPL-3.0). The transport protocol, the request/response bookkeeping and the
- * queue semantics are kept structurally identical to upstream so the port can
- * be followed forward when Zotero changes; the message payloads it exchanges
- * with the worker are untyped JSON on both sides.
- *
- * Typing that boundary would mean diverging from the shape being tracked, for
- * no runtime benefit, so the `any` family is switched off for the file rather
- * than worked around inside it.
+ * (AGPL-3.0). The transport protocol and queue semantics follow the worker
+ * bundled from zotero/document-worker commit fd642b3.
  */
 import * as Comlink from "comlink";
 import { db } from "db/db";
@@ -26,20 +20,108 @@ interface WorkerMessage {
     id?: number;
     responseID?: number;
     action?: string;
-    data?: any;
-    error?: any;
+    data?: unknown;
+    error?: unknown;
 }
 
 type PromiseResolvers = {
-    resolve: (value: any) => void;
-    reject: (reason?: any) => void;
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
 };
 
-type QueueItem = [
-    () => Promise<any>,
-    (value: any) => void,
-    (reason?: any) => void,
-];
+type QueueItem = () => Promise<void>;
+
+interface SaveRenderedAnnotationRequest {
+    libraryID: number;
+    annotationKey: string;
+    buf: ArrayBuffer;
+}
+
+interface BufferResponse {
+    buf: ArrayBuffer;
+}
+
+interface ExportAnnotation {
+    id: string;
+    type: string;
+    authorName: string;
+    comment: string;
+    color: string;
+    position: unknown;
+    dateModified: string;
+    tags: string[];
+}
+
+type ImportedAnnotation = Omit<
+    AnnotationJSON,
+    "id" | "isExternal" | "tags" | "dateModified" | "dateAdded"
+> &
+    Partial<
+        Pick<
+            AnnotationJSON,
+            "id" | "isExternal" | "tags" | "dateModified" | "dateAdded"
+        >
+    >;
+
+interface ImportResponse {
+    imported: ImportedAnnotation[];
+    deleted: string[];
+    buf?: ArrayBuffer;
+}
+
+export interface PDFRecognizerData {
+    metadata: Record<string, string>;
+    totalPages: number;
+    pages: unknown[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    if (isRecord(error) && typeof error.message === "string") {
+        return error.message;
+    }
+    if (typeof error === "string") {
+        return error;
+    }
+    return JSON.stringify(error) || "Unknown worker error";
+}
+
+function getWorkerErrorName(error: unknown): string {
+    return isRecord(error) && typeof error.name === "string"
+        ? error.name
+        : "WorkerError";
+}
+
+function isSaveRenderedAnnotationRequest(
+    data: unknown,
+): data is SaveRenderedAnnotationRequest {
+    return (
+        isRecord(data) &&
+        typeof data.libraryID === "number" &&
+        typeof data.annotationKey === "string" &&
+        data.buf instanceof ArrayBuffer
+    );
+}
+
+function getOriginalFetch(): typeof fetch {
+    const workerGlobal = globalThis as typeof globalThis & {
+        originalFetch?: unknown;
+    };
+    if (typeof workerGlobal.originalFetch !== "function") {
+        throw new Error("Native worker fetch is unavailable");
+    }
+    return workerGlobal.originalFetch as typeof fetch;
+}
+
+function parseJson(text: string): unknown {
+    return JSON.parse(text) as unknown;
+}
 
 /** Manages a nested PDF.js Web Worker for PDF operations (export, import, annotation rendering). */
 export class PDFProcessWorker {
@@ -101,36 +183,40 @@ export class PDFProcessWorker {
             return;
         }
         this._processingQueue = true;
-        let item;
-        while ((item = this._queue.shift())) {
-            if (item) {
-                let [fn, resolve, reject] = item;
-                try {
-                    resolve(await fn());
-                } catch (e) {
-                    reject(e);
-                }
-            }
+        let queuedOperation: QueueItem | undefined;
+        while ((queuedOperation = this._queue.shift())) {
+            await queuedOperation();
         }
         this._processingQueue = false;
     }
 
     async _enqueue<T>(fn: () => Promise<T>, isPriority?: boolean): Promise<T> {
         return new Promise((resolve, reject) => {
+            const queuedOperation = async () => {
+                try {
+                    resolve(await fn());
+                } catch (error) {
+                    reject(
+                        error instanceof Error
+                            ? error
+                            : new Error(getErrorMessage(error)),
+                    );
+                }
+            };
             if (isPriority) {
-                this._queue.unshift([fn, resolve, reject]);
+                this._queue.unshift(queuedOperation);
             } else {
-                this._queue.push([fn, resolve, reject]);
+                this._queue.push(queuedOperation);
             }
             void this._processQueue();
         });
     }
 
-    async _query(
+    async _query<T>(
         action: string,
-        data: any,
+        data: unknown,
         transfer?: Transferable[],
-    ): Promise<any> {
+    ): Promise<T> {
         return new Promise((resolve, reject) => {
             if (!this._worker) {
                 reject(
@@ -143,7 +229,10 @@ export class PDFProcessWorker {
                 return;
             }
             this._lastPromiseID++;
-            this._waitingPromises[this._lastPromiseID] = { resolve, reject };
+            this._waitingPromises[this._lastPromiseID] = {
+                resolve: (value) => resolve(value as T),
+                reject,
+            };
             this._worker.postMessage(
                 { id: this._lastPromiseID, action, data },
                 transfer || [],
@@ -165,62 +254,69 @@ export class PDFProcessWorker {
                 "PDF Worker URL not configured",
             );
         }
-        this._worker = new Worker(this.config.pdfWorkerURL);
-        this._worker.addEventListener(
+        const worker = new Worker(this.config.pdfWorkerURL);
+        this._worker = worker;
+        worker.addEventListener(
             "message",
             (event: MessageEvent<WorkerMessage>) => {
                 // The listener contract is void; the handler reports its own
                 // failures, so the promise is marked rather than returned.
                 void (async () => {
-                    let message = event.data;
+                    const message = event.data;
     
                     // Handle Response (Worker -> Main Request)
-                    if (message.responseID) {
-                        let resolver = this._waitingPromises[message.responseID];
+                    if (message.responseID !== undefined) {
+                        const resolver =
+                            this._waitingPromises[message.responseID];
                         if (resolver) {
-                            let { resolve, reject } = resolver;
+                            const { resolve, reject } = resolver;
                             delete this._waitingPromises[message.responseID];
-                            if (message.data) {
-                                resolve(message.data);
-                            } else {
-                                // Extract error details safely
-                                const rawErr = message.error || {};
-                                const errMsg =
-                                    rawErr.message || JSON.stringify(rawErr);
-                                const errName = rawErr.name || "WorkerError";
-    
-                                // Convert to ZotFlowError
-                                // Check specific names if we need to distinguish (e.g. PasswordException)
+                            if (
+                                message.error !== undefined &&
+                                message.error !== null
+                            ) {
+                                const errorMessage = getErrorMessage(
+                                    message.error,
+                                );
+                                const errorName = getWorkerErrorName(
+                                    message.error,
+                                );
                                 reject(
                                     new ZotFlowError(
                                         ZotFlowErrorCode.PARSE_ERROR,
                                         "PDFProcessWorker",
-                                        `PDF Worker Error (${errName}): ${errMsg}`,
+                                        `PDF Worker Error (${errorName}): ${errorMessage}`,
                                     ),
                                 );
+                            } else {
+                                resolve(message.data);
                             }
                         }
                         return;
                     }
     
                     // Handle Request (Worker -> Main Request)
-                    if (message.id) {
-                        let respData: any = null;
-                        let respError: any = null;
+                    if (message.id !== undefined) {
+                        let responseData: unknown = null;
+                        let responseError: { message: string } | null = null;
     
                         try {
                             if (message.action === "FetchBuiltInCMap") {
+                                if (typeof message.data !== "string") {
+                                    throw new Error(
+                                        "Invalid CMap request payload",
+                                    );
+                                }
                                 const cMapUrl =
                                     this._blobUrls[
                                         `pdf/web/cmaps/${message.data}.bcmap`
                                     ];
                                 if (cMapUrl) {
-                                    const response = await (
-                                        globalThis as any
-                                    ).originalFetch(cMapUrl);
+                                    const response =
+                                        await getOriginalFetch()(cMapUrl);
                                     const arrayBuffer =
                                         await response.arrayBuffer();
-                                    respData = {
+                                    responseData = {
                                         isCompressed: true,
                                         cMapData: new Uint8Array(arrayBuffer),
                                     };
@@ -242,22 +338,26 @@ export class PDFProcessWorker {
                                 "PDFProcessWorker",
                                 e,
                             );
-                            respError = { message: (e as Error).message };
+                            responseError = { message: getErrorMessage(e) };
                         }
     
                         try {
                             if (message.action === "FetchStandardFontData") {
+                                if (typeof message.data !== "string") {
+                                    throw new Error(
+                                        "Invalid standard font request payload",
+                                    );
+                                }
                                 const fontUrl =
                                     this._blobUrls[
                                         `pdf/web/standard_fonts/${message.data}`
                                     ];
                                 if (fontUrl) {
-                                    const response = await (
-                                        globalThis as any
-                                    ).originalFetch(fontUrl);
+                                    const response =
+                                        await getOriginalFetch()(fontUrl);
                                     const arrayBuffer =
                                         await response.arrayBuffer();
-                                    respData = new Uint8Array(arrayBuffer);
+                                    responseData = new Uint8Array(arrayBuffer);
                                 } else {
                                     this.parentHost.log(
                                         "warn",
@@ -276,11 +376,20 @@ export class PDFProcessWorker {
                                 "PDFProcessWorker",
                                 e,
                             );
-                            respError = { message: (e as Error).message };
+                            responseError = { message: getErrorMessage(e) };
                         }
     
                         try {
                             if (message.action === "SaveRenderedAnnotation") {
+                                if (
+                                    !isSaveRenderedAnnotationRequest(
+                                        message.data,
+                                    )
+                                ) {
+                                    throw new Error(
+                                        "Invalid rendered annotation payload",
+                                    );
+                                }
                                 const { libraryID, annotationKey, buf } =
                                     message.data;
     
@@ -301,7 +410,7 @@ export class PDFProcessWorker {
                                     Comlink.transfer(buf, [buf]),
                                 );
     
-                                respData = true;
+                                responseData = true;
                             }
                         } catch (e) {
                             this.parentHost.log(
@@ -310,19 +419,19 @@ export class PDFProcessWorker {
                                 "PDFProcessWorker",
                                 e,
                             );
-                            respError = { message: (e as Error).message };
+                            responseError = { message: getErrorMessage(e) };
                         }
-    
-                        this._worker!.postMessage({
+
+                        worker.postMessage({
                             responseID: message.id,
-                            data: respData,
-                            error: respError, // Explicitly send error back
+                            data: responseData,
+                            error: responseError,
                         });
                     }
                 })();
             },
         );
-        this._worker.addEventListener("error", (event) => {
+        worker.addEventListener("error", (event) => {
             this.parentHost.log(
                 "error",
                 `PDF Web Worker error (${event.filename}:${event.lineno}): ${event.message}`,
@@ -344,15 +453,17 @@ export class PDFProcessWorker {
         buf: ArrayBuffer,
         items: IDBZoteroItem<AnnotationData>[],
         isPriority?: boolean,
-    ): Promise<Uint8Array> {
+    ): Promise<ArrayBuffer> {
         return this._enqueue(async () => {
             // ... (Logic extracted from original file, largely database independent logic)
             // Need to verify if `items` are raw objects or Dexie objects depending on worker
             // But they are passed as arguments.
 
-            items = items.filter((x) => !x.raw.data.annotationIsExternal);
-            let annotations: any[] = [];
-            for (let item of items) {
+            const internalItems = items.filter(
+                (item) => !item.raw.data.annotationIsExternal,
+            );
+            const annotations: ExportAnnotation[] = [];
+            for (const item of internalItems) {
                 annotations.push({
                     id: item.key,
                     type: item.raw.data.annotationType,
@@ -364,16 +475,20 @@ export class PDFProcessWorker {
                     color: item.raw.data.annotationColor,
                     position:
                         typeof item.raw.data.annotationPosition === "string"
-                            ? JSON.parse(item.raw.data.annotationPosition)
+                            ? parseJson(item.raw.data.annotationPosition)
                             : item.raw.data.annotationPosition,
                     dateModified: item.raw.data.dateModified,
                     tags: item.raw.data.tags.map((x) => x.tag),
                 });
             }
 
-            let res: any;
+            let response: BufferResponse;
             try {
-                res = await this._query("export", { buf, annotations }, [buf]);
+                response = await this._query<BufferResponse>(
+                    "export",
+                    { buf, annotations },
+                    [buf],
+                );
             } catch (e) {
                 throw ZotFlowError.wrap(
                     e,
@@ -382,7 +497,7 @@ export class PDFProcessWorker {
                     "PDF Export failed",
                 );
             }
-            return res.buf;
+            return response.buf;
         }, isPriority);
     }
 
@@ -394,9 +509,9 @@ export class PDFProcessWorker {
         isPriority?: boolean,
     ): Promise<AnnotationJSON[]> {
         return this._enqueue(async () => {
-            let imported: any[];
+            let imported: ImportedAnnotation[];
             try {
-                ({ imported } = await this._query(
+                ({ imported } = await this._query<ImportResponse>(
                     "import",
                     { buf, existingAnnotations: [] },
                     [buf],
@@ -412,18 +527,21 @@ export class PDFProcessWorker {
 
             // The worker already emits the reader's annotation JSON, so this
             // only supplies the fields a PDF has no source for.
-            let annotations: AnnotationJSON[] = [];
-            for (let annotation of imported) {
-                annotation.id = Math.round(Math.random() * 4294967295)
-                    .toString()
-                    .slice(0, 8);
-                annotation.isExternal = true;
-                annotation.tags = annotation.tags ?? [];
-                annotation.dateModified = annotation.dateModified ?? "";
+            const annotations: AnnotationJSON[] = [];
+            for (const annotation of imported) {
+                const dateModified = annotation.dateModified ?? "";
                 // A PDF annotation records only a modification stamp.
-                annotation.dateAdded =
-                    annotation.dateAdded ?? annotation.dateModified;
-                annotations.push(annotation);
+                const dateAdded = annotation.dateAdded ?? dateModified;
+                annotations.push({
+                    ...annotation,
+                    id: Math.round(Math.random() * 4294967295)
+                        .toString()
+                        .slice(0, 8),
+                    isExternal: true,
+                    tags: annotation.tags ?? [],
+                    dateModified,
+                    dateAdded,
+                });
             }
             return annotations;
         }, isPriority);
@@ -442,7 +560,7 @@ export class PDFProcessWorker {
         return this._enqueue(async () => {
             let modifiedBuf: ArrayBuffer;
             try {
-                ({ buf: modifiedBuf } = await this._query(
+                ({ buf: modifiedBuf } = await this._query<BufferResponse>(
                     "rotatePages",
                     {
                         buf,
@@ -452,7 +570,7 @@ export class PDFProcessWorker {
                     },
                     [buf],
                 ));
-            } catch (e: any) {
+            } catch (e) {
                 throw ZotFlowError.wrap(
                     e,
                     ZotFlowErrorCode.PARSE_ERROR,
@@ -472,11 +590,11 @@ export class PDFProcessWorker {
         buf: ArrayBuffer,
         isPriority?: boolean,
         password?: string,
-    ): Promise<any> {
+    ): Promise<PDFRecognizerData> {
         return this._enqueue(async () => {
-            let result: any;
+            let result: PDFRecognizerData;
             try {
-                result = await this._query(
+                result = await this._query<PDFRecognizerData>(
                     "getRecognizerData",
                     { buf, password },
                     [buf],
@@ -499,13 +617,13 @@ export class PDFProcessWorker {
     async renderAnnotations(
         libraryID: number,
         buf: ArrayBuffer,
-        annotations: any[],
+        annotations: AnnotationJSON[],
         password?: string,
-    ): Promise<any> {
+    ): Promise<number> {
         return this._enqueue(async () => {
-            let result: any;
+            let result: number;
             try {
-                result = await this._query(
+                result = await this._query<number>(
                     "renderAnnotations",
                     { libraryID, buf, annotations, password },
                     [buf],

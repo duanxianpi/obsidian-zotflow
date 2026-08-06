@@ -16,6 +16,7 @@ export default defineConfig(
         "version-bump.mjs",
         "versions.json",
         "main.js",
+        "src/main.js",
         "package.json",
         "package-lock.json",
         "tsconfig.json",
@@ -77,35 +78,6 @@ export default defineConfig(
         files: ["**/*.{js,jsx,mjs,cjs}"],
         rules: {
             "obsidianmd/no-plugin-as-component": "off",
-        },
-    },
-    {
-        // Two ported files. pdf-processor.ts follows Zotero's own pdfWorker
-        // manager; markdown-editor.ts follows a community plugin's embedded
-        // editor and drives Obsidian's unexported CodeMirror plumbing. Both are
-        // kept structurally close to their upstreams so the ports stay
-        // followable, and both talk to boundaries that are untyped on the other
-        // side. Typing them would mean diverging from the shape being tracked
-        // for no runtime benefit.
-        //
-        // Declared here rather than as inline directives on purpose:
-        // `eslint-comments/no-restricted-disable` deliberately forbids
-        // suppressing `no-explicit-any` and the obsidianmd rules from inside a
-        // file, so an exception belongs somewhere reviewable.
-        files: [
-            "src/worker/services/pdf-processor.ts",
-            "src/ui/editor/markdown-editor.ts",
-        ],
-        rules: {
-            "@typescript-eslint/no-explicit-any": "off",
-            "@typescript-eslint/no-unsafe-assignment": "off",
-            "@typescript-eslint/no-unsafe-member-access": "off",
-            "@typescript-eslint/no-unsafe-call": "off",
-            "@typescript-eslint/no-unsafe-return": "off",
-            "@typescript-eslint/no-unsafe-argument": "off",
-            "@typescript-eslint/no-unnecessary-type-assertion": "off",
-            "@typescript-eslint/no-this-alias": "off",
-            "obsidianmd/no-tfile-tfolder-cast": "off",
         },
     },
     {

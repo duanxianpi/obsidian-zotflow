@@ -156,7 +156,8 @@ export class CitationSuggest extends EditorSuggest<SuggestionItem> {
     private pickWithFormat(evt: KeyboardEvent, format: CitationFormat): void {
         const suggestions = this.suggestions;
         const selectedIndex: number | undefined = suggestions?.selectedItem;
-        const values: SuggestionItem[] | undefined = suggestions?.values;
+        const values = suggestions?.values as unknown as
+            SuggestionItem[] | undefined;
 
         if (
             selectedIndex == null ||
