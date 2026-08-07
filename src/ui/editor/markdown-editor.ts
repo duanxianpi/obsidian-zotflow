@@ -47,7 +47,7 @@ import type {
     EmbedRegistry,
     MarkdownScrollableEditView,
     WidgetEditorView,
-} from "@obsidian-typings/obsidian-public-1.11.4";
+} from "@obsidian-typings/obsidian-public-1.13.4";
 
 interface EmbeddedEditorOwner extends MarkdownFileInfo {
     editMode?: EmbeddableMarkdownEditor;
@@ -106,10 +106,10 @@ export function createEmbeddableMarkdownEditor(
 function resolveEditorPrototype(app: App): MarkdownEditorConstructor {
     const embedRegistry = (app as App & { embedRegistry: EmbedRegistry })
         .embedRegistry;
-    const embedCreators = embedRegistry.embedByExtension as typeof embedRegistry
-        .embedByExtension & {
-        md: MarkdownEmbedCreator;
-    };
+    const embedCreators =
+        embedRegistry.embedByExtension as typeof embedRegistry.embedByExtension & {
+            md: MarkdownEmbedCreator;
+        };
     const embedComponent = embedCreators.md(
         { app, containerEl: createDiv() },
         null,
@@ -155,8 +155,7 @@ function isWidgetEditorView(
     component: EmbedComponent,
 ): component is WidgetEditorView {
     return (
-        "showEditor" in component &&
-        typeof component.showEditor === "function"
+        "showEditor" in component && typeof component.showEditor === "function"
     );
 }
 

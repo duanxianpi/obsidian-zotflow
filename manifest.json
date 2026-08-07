@@ -2,7 +2,7 @@
 	"id": "zotflow",
 	"name": "ZotFlow",
 	"version": "1.4.1",
-	"minAppVersion": "1.11.4",
+	"minAppVersion": "1.13.4",
 	"description": "Keep your research in flow!",
 	"author": "Xianpi Duan",
 	"authorUrl": "https://github.com/duanxianpi/",

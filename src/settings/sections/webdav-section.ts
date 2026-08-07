@@ -86,7 +86,7 @@ export class WebDavSection {
                     button
                         .setButtonText("Disconnect")
                         .setIcon("unlink")
-                        .setWarning()
+                        .setDestructive()
                         .onClick(async () => {
                             this.plugin.settings.webDavUrl = "";
                             this.plugin.settings.webDavUser = "";

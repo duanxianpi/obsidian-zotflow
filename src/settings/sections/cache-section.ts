@@ -127,7 +127,7 @@ export class CacheSection {
             new Setting(btnContainer).addButton((btn) =>
                 btn
                     .setButtonText("Purge Cache")
-                    .setWarning()
+                    .setDestructive()
                     .onClick(async () => {
                         try {
                             await workerBridge.attachment.purgeCache();
