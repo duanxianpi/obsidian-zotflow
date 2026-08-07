@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-import fs, { watch } from "fs";
+import fs from "fs";
 import path from "path";
 import zlib from "zlib";
 import { builtinModules } from "node:module";
@@ -153,7 +153,9 @@ const copyLicensePlugin = {
                 );
                 const licenseContent = fs.readFileSync(licenseFile, "utf-8");
                 fs.writeFileSync("reader.js.LICENSE.txt", licenseContent);
-            } catch (e) {}
+            } catch {
+                // The reader license is absent until the reader has been built.
+            }
         });
     },
 };

@@ -421,10 +421,9 @@ export class IframeReaderBridge {
         // counts loads of THIS element only.
         this.iframeLoadCount = 0;
         const doc = this.container.ownerDocument; // Get the document of the container
-        // `doc` is already the container's own document, popped-out or not, so
-        // this creates the iframe in the right window. The rule's suggested
-        // `doc.win.createEl` is not on Obsidian's `Window` type at all — see
-        // the carve-out in eslint.config.mts.
+        // The container's owner document is already popout-safe, and the
+        // iframe must remain detached until it is fully configured below.
+        // eslint-disable-next-line obsidianmd/prefer-create-el -- `doc.win` is not guaranteed for test or detached documents
         this.iframe = doc.createElement("iframe");
         this.iframe.id = "zotero-reader-iframe";
         this.iframe.setCssStyles({

@@ -1,5 +1,4 @@
 import * as Comlink from "comlink";
-// @ts-expect-error esbuild virtual module "virtual:worker"
 import workerCode from "virtual:worker";
 import { ParentHost } from "./parent-host";
 import { getBlobUrls } from "bundle-assets/inline-assets";
@@ -42,6 +41,10 @@ import type { AttachmentIdentifier } from "worker/tasks/impl/batch-extract-exter
 
 import { services } from "services/services";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+
+function materializeComlinkProxy<T>(proxy: T): Promise<Awaited<T>> {
+    return Promise.resolve(proxy);
+}
 
 /** Comlink-based RPC wrapper managing the Web Worker lifecycle and exposing all worker service proxies. */
 export class WorkerBridge {
@@ -91,38 +94,37 @@ export class WorkerBridge {
             blobUrls,
         );
 
-        /*
-         * Each of these awaits is a real round trip, despite `await-thenable`:
-         * a Comlink proxy is thenable at runtime (the `then` trap sends a GET),
-         * and the worker's getters return `Comlink.proxy(service)`, so awaiting
-         * materialises a dedicated MessagePort for that service. Comlink's own
-         * types do not model the `then` trap, which is why the rule fires.
-         * Dropping the awaits would reroute every call through the root proxy.
-         */
-        /* eslint-disable @typescript-eslint/await-thenable -- Comlink proxies are
-           thenable at runtime; its types do not model the `then` trap. */
-        this._attachment = await this._api.attachment;
-        this._sync = await this._api.sync;
-        this._zotero = await this._api.zotero;
-        this._webdav = await this._api.webdav;
-        this._treeView = await this._api.treeView;
-        this._libraryNote = await this._api.libraryNote;
-        this._itemNote = await this._api.itemNote;
-        this._localNote = await this._api.localNote;
-        this._conflict = await this._api.conflict;
-        this._annotation = await this._api.annotation;
-        this._key = await this._api.key;
-        this._library = await this._api.library;
-        this._dbHelper = await this._api.dbHelper;
-        this._tag = await this._api.tag;
-        this._pdfProcessor = await this._api.pdfProcessor;
-        this._libraryTemplate = await this._api.libraryTemplate;
-        this._localTemplate = await this._api.localTemplate;
-        this._notePath = await this._api.notePath;
-        this._cslRender = await this._api.cslRender;
-        this._tasks = await this._api.tasks;
-        /* eslint-enable @typescript-eslint/await-thenable -- end of the proxy
-           materialisation block. */
+        // Promise.resolve performs the same thenable assimilation as `await`.
+        // Comlink's runtime `then` trap materialises each dedicated MessagePort,
+        // although its TypeScript types do not expose that thenable shape.
+        this._attachment = await materializeComlinkProxy(this._api.attachment);
+        this._sync = await materializeComlinkProxy(this._api.sync);
+        this._zotero = await materializeComlinkProxy(this._api.zotero);
+        this._webdav = await materializeComlinkProxy(this._api.webdav);
+        this._treeView = await materializeComlinkProxy(this._api.treeView);
+        this._libraryNote = await materializeComlinkProxy(
+            this._api.libraryNote,
+        );
+        this._itemNote = await materializeComlinkProxy(this._api.itemNote);
+        this._localNote = await materializeComlinkProxy(this._api.localNote);
+        this._conflict = await materializeComlinkProxy(this._api.conflict);
+        this._annotation = await materializeComlinkProxy(this._api.annotation);
+        this._key = await materializeComlinkProxy(this._api.key);
+        this._library = await materializeComlinkProxy(this._api.library);
+        this._dbHelper = await materializeComlinkProxy(this._api.dbHelper);
+        this._tag = await materializeComlinkProxy(this._api.tag);
+        this._pdfProcessor = await materializeComlinkProxy(
+            this._api.pdfProcessor,
+        );
+        this._libraryTemplate = await materializeComlinkProxy(
+            this._api.libraryTemplate,
+        );
+        this._localTemplate = await materializeComlinkProxy(
+            this._api.localTemplate,
+        );
+        this._notePath = await materializeComlinkProxy(this._api.notePath);
+        this._cslRender = await materializeComlinkProxy(this._api.cslRender);
+        this._tasks = await materializeComlinkProxy(this._api.tasks);
 
         this._initialized = true;
         services.logService.log(

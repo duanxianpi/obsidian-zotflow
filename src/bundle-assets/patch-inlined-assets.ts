@@ -90,6 +90,7 @@ export function patchPDFJSViewerHTML(
         'link[rel="stylesheet"][href="viewer.css"]',
     );
     cssLinks.forEach((linkEl) => {
+        // eslint-disable-next-line obsidianmd/prefer-create-el -- DOMParser returns a detached document without a guaranteed `doc.win`
         const styleEl = doc.createElement("style");
         styleEl.textContent = getPatchedViewerCSS(BLOB_BINARY_MAP);
         linkEl.replaceWith(styleEl);

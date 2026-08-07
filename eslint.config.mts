@@ -12,8 +12,6 @@ export default defineConfig(
         "coverage/**",
         "reader/reader/**",
         "note-editor/note-editor/**",
-        "esbuild.config.mjs",
-        "version-bump.mjs",
         "versions.json",
         "main.js",
         "src/main.js",
@@ -32,6 +30,8 @@ export default defineConfig(
                         "eslint.config.mts",
                         "manifest.json",
                         "vitest.config.ts",
+                        "esbuild.config.mjs",
+                        "version-bump.mjs",
                         // Build/dev tooling. Deliberately outside tsconfig.json,
                         // which covers only the shipped `src` tree — but they
                         // are tracked files, so they should still be linted
@@ -75,37 +75,25 @@ export default defineConfig(
         },
     },
     {
-        files: ["**/*.{js,jsx,mjs,cjs}"],
+        // Permit one documented line-level DOM exception in each file while
+        // keeping `prefer-create-el` active for every other DOM creation.
+        files: [
+            "src/bundle-assets/patch-inlined-assets.ts",
+            "src/ui/reader/bridge.ts",
+        ],
         rules: {
-            "obsidianmd/no-plugin-as-component": "off",
+            "eslint-comments/no-restricted-disable": "off",
         },
     },
     {
-        files: ["src/ui/reader/bridge.ts"],
-        rules: {
-            // The iframe is built on `container.ownerDocument`, which is
-            // already the right window's document whether or not the reader is
-            // popped out. The rule suggests `doc.win.createEl`, but `createEl`
-            // is declared on Element/Document and as a global — never on
-            // `Window` — so its own suggestion does not typecheck.
-            "obsidianmd/prefer-create-el": "off",
-        },
-    },
-    {
-        // These files build the PDF.js viewer's HTML with `DOMParser`, so the
-        // document they hold is detached and belongs to no window. Obsidian's
-        // `createEl` helpers hang off `Document#win`, which such a document
-        // does not have — the suggested fix would throw at runtime.
-        files: ["src/bundle-assets/**"],
-        rules: {
-            "obsidianmd/prefer-create-el": "off",
-        },
-    },
-    {
-        // Build/dev tooling, same carve-out as `tests/` below: these run under
-        // Node on a developer's machine and never reach the mobile bundle, so
-        // the rules that exist to keep that bundle portable do not apply.
-        files: ["scripts/**"],
+        // Node-only tooling and tests never reach the mobile plugin bundle.
+        files: [
+            "scripts/**",
+            "esbuild.config.mjs",
+            "version-bump.mjs",
+            "tests/**/*.ts",
+            "vitest.config.ts",
+        ],
         languageOptions: {
             globals: {
                 ...globals.node,
@@ -126,27 +114,11 @@ export default defineConfig(
         // untyped API payloads, where narrowing every access adds noise
         // without catching anything.
         files: ["tests/**/*.ts", "vitest.config.ts"],
-        languageOptions: {
-            globals: {
-                ...globals.node,
-            },
-        },
         rules: {
-            // Test output IS console output: the syntax-survival matrix and the
-            // fixture reports are the deliverable, not stray debug logging.
-            "obsidianmd/rule-custom-message": "off",
-            // CodeMirror is externalized from the plugin bundle and declared
-            // directly only to type-check source; tests run against that same
-            // installed version rather than a bundled runtime copy.
-            "import/no-extraneous-dependencies": "off",
-            // Build/test tooling runs in Node, never in the plugin bundle.
-            "obsidianmd/no-nodejs-modules": "off",
             "obsidianmd/no-global-this": "off",
             // No popout window — and no `window` at all — in the Node runner.
             "obsidianmd/prefer-window-timers": "off",
-            "no-restricted-globals": "off",
             "@typescript-eslint/no-explicit-any": "off",
-            "@typescript-eslint/no-unsafe-any": "off",
             "@typescript-eslint/no-unsafe-argument": "off",
             "@typescript-eslint/no-unsafe-assignment": "off",
             "@typescript-eslint/no-unsafe-member-access": "off",

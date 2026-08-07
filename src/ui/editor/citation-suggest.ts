@@ -85,7 +85,11 @@ export class CitationSuggest extends EditorSuggest<SuggestionItem> {
         view.editor.setCursor({ line: cursor.line, ch: cursor.ch + t.length });
         this.manualTriggerStart = cursor;
         // Force Obsidian to evaluate onTrigger() immediately
-        this.trigger(view.editor, activeFile, true);
+        (
+            this as typeof this & {
+                trigger(editor: Editor, file: TFile, manual: boolean): void;
+            }
+        ).trigger(view.editor, activeFile, true);
     }
 
     onTrigger(
