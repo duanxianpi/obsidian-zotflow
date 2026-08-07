@@ -75,14 +75,14 @@ export default defineConfig(
         },
     },
     {
-        // Permit one documented line-level DOM exception in each file while
-        // keeping `prefer-create-el` active for every other DOM creation.
+        // These detached/owner-document elements cannot safely use Obsidian's
+        // active-window helpers.
         files: [
             "src/bundle-assets/patch-inlined-assets.ts",
             "src/ui/reader/bridge.ts",
         ],
         rules: {
-            "eslint-comments/no-restricted-disable": "off",
+            "obsidianmd/prefer-create-el": "off",
         },
     },
     {

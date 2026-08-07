@@ -423,7 +423,6 @@ export class IframeReaderBridge {
         const doc = this.container.ownerDocument; // Get the document of the container
         // The container's owner document is already popout-safe, and the
         // iframe must remain detached until it is fully configured below.
-        // eslint-disable-next-line obsidianmd/prefer-create-el -- `doc.win` is not guaranteed for test or detached documents
         this.iframe = doc.createElement("iframe");
         this.iframe.id = "zotero-reader-iframe";
         this.iframe.setCssStyles({
