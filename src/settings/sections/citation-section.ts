@@ -1,168 +1,109 @@
-import { SettingGroup } from "obsidian";
-
 import type ZotFlow from "main";
-import type { AutoCopyAnnotationMode, CitationFormat } from "settings/types";
+import type { SettingDefinitionItem } from "obsidian";
+import type { SettingKey } from "settings/types";
 
-/** Settings section for citation insertion format. */
+/** Declarative citation insertion settings. */
 export class CitationSection {
-    constructor(
-        private plugin: ZotFlow,
-        private refreshUI: () => void,
-    ) {}
+    constructor(private readonly plugin: ZotFlow) {}
 
-    render(containerEl: HTMLElement) {
-        const citationGroup = new SettingGroup(containerEl);
-        citationGroup.setHeading("Citation");
-
-        citationGroup.addSetting((setting) => {
-            setting
-                .setName("Default Citation Format")
-                .setDesc(
-                    "Format used when inserting a citation with Enter (no modifier key).",
-                )
-                .addDropdown((dropdown) => {
-                    dropdown
-                        .addOption("pandoc", "Pandoc")
-                        .addOption("footnote", "Footnote")
-                        .addOption("wikilink", "Wikilink")
-                        .setValue(this.plugin.settings.defaultCitationFormat)
-                        .onChange(async (value) => {
-                            this.plugin.settings.defaultCitationFormat =
-                                value as CitationFormat;
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
-        citationGroup.addSetting((setting) => {
-            setting
-                .setName("Trigger Character")
-                .setDesc(
-                    "Character sequence that triggers the citation suggest popup in the editor.",
-                )
-                .addText((text) => {
-                    text.setPlaceholder("e.g. @@")
-                        .setValue(this.plugin.settings.citationTrigger)
-                        .onChange(async (value) => {
-                            this.plugin.settings.citationTrigger =
-                                value || "@@";
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 10;
-                });
-        });
-
-        citationGroup.addSetting((setting) => {
-            setting
-                .setName("Pandoc Template")
-                .setDesc(
-                    "LiquidJS template for pandoc citation text. " +
-                        "Available variables: title, creators, citationKey, year, notePath, and all item metadata fields. " +
-                        "Leave empty for default [@citekey].",
-                )
-                .addTextArea((ta) => {
-                    ta.setPlaceholder("e.g. [@{{item.citationKey}}]")
-                        .setValue(this.plugin.settings.citationPandocTemplate)
-                        .onChange(async (value) => {
-                            this.plugin.settings.citationPandocTemplate = value;
-                            await this.plugin.saveSettings();
-                        });
-                    ta.inputEl.rows = 5;
-                    ta.inputEl.cols = 60;
-                });
-        });
-
-        citationGroup.addSetting((setting) => {
-            setting
-                .setName("Footnote Reference Template")
-                .setDesc(
-                    "LiquidJS template for the inline footnote reference (e.g. [^item.citationKey]). " +
-                        "Annotation data is available here for page-specific citations. " +
-                        "Leave empty for default [^item.citationKey].",
-                )
-                .addTextArea((ta) => {
-                    ta.setPlaceholder("e.g. [^{{item.citationKey}}]")
-                        .setValue(
-                            this.plugin.settings.citationFootnoteRefTemplate,
-                        )
-                        .onChange(async (value) => {
-                            this.plugin.settings.citationFootnoteRefTemplate =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    ta.inputEl.rows = 5;
-                    ta.inputEl.cols = 60;
-                });
-        });
-
-        citationGroup.addSetting((setting) => {
-            setting
-                .setName("Footnote Definition Template")
-                .setDesc(
-                    "LiquidJS template for the footnote definition(s) appended at the end of the note. " +
-                        "Annotation data is available here (same context as the Footnote Reference Template). " +
-                        "Include the [^marker]: prefix yourself so each definition aligns with its reference — " +
-                        "loop over annotations to emit one definition per annotation. " +
-                        "A template with no [^marker]: prefix reuses the reference's marker automatically. " +
-                        "Leave empty to insert the footnote reference only.",
-                )
-                .addTextArea((ta) => {
-                    ta.setPlaceholder(
-                        "e.g. [^{{item.citationKey}}]: {{item.creators[0].name}}, *{{item.title}}*, {{item.year}}",
-                    )
-                        .setValue(this.plugin.settings.citationFootnoteTemplate)
-                        .onChange(async (value) => {
-                            this.plugin.settings.citationFootnoteTemplate =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    ta.inputEl.rows = 5;
-                    ta.inputEl.cols = 60;
-                });
-        });
-
-        citationGroup.addSetting((setting) => {
-            setting
-                .setName("Wikilink Template")
-                .setDesc(
-                    "LiquidJS template for wikilink citation text. " +
-                        "Available variables: title, creators, citationKey, year, notePath, and all item metadata fields. " +
-                        "Leave empty to use Obsidian's default markdown link format.",
-                )
-                .addTextArea((ta) => {
-                    ta.setPlaceholder(
-                        "e.g. [[{{item.notePath}}|{{item.title}}]]",
-                    )
-                        .setValue(this.plugin.settings.citationWikilinkTemplate)
-                        .onChange(async (value) => {
-                            this.plugin.settings.citationWikilinkTemplate =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    ta.inputEl.rows = 5;
-                    ta.inputEl.cols = 60;
-                });
-        });
-
-        citationGroup.addSetting((setting) => {
-            setting
-                .setName("Auto-copy New Annotation")
-                .setDesc(
-                    "When you create an annotation in the reader, automatically copy it to the clipboard. " +
-                        "Embed inserts ![[note#^id]]; Text copies the highlighted text; Citation uses the default citation format above.",
-                )
-                .addDropdown((dropdown) => {
-                    dropdown
-                        .addOption("off", "Off")
-                        .addOption("embed", "Embed")
-                        .addOption("text", "Text")
-                        .addOption("citation", "Citation")
-                        .setValue(this.plugin.settings.autoCopyAnnotation)
-                        .onChange(async (value) => {
-                            this.plugin.settings.autoCopyAnnotation =
-                                value as AutoCopyAnnotationMode;
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
+    getDefinitions(): SettingDefinitionItem<SettingKey>[] {
+        return [
+            {
+                type: "group",
+                heading: "Citation",
+                cls: "zotflow-settings-citation",
+                items: [
+                    {
+                        name: "Default Citation Format",
+                        desc: "Format used when inserting a citation with Enter (no modifier key).",
+                        control: {
+                            type: "dropdown",
+                            key: "defaultCitationFormat",
+                            options: {
+                                pandoc: "Pandoc",
+                                footnote: "Footnote",
+                                wikilink: "Wikilink",
+                            },
+                        },
+                    },
+                    {
+                        name: "Trigger Character",
+                        desc: "Character sequence that triggers the citation suggest popup in the editor.",
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setPlaceholder("e.g. @@")
+                                    .setValue(
+                                        this.plugin.settings.citationTrigger,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.citationTrigger =
+                                            value || "@@";
+                                        await this.plugin.saveSettings();
+                                    });
+                                text.inputEl.size = 10;
+                            });
+                        },
+                    },
+                    {
+                        name: "Pandoc Template",
+                        desc: "LiquidJS template for pandoc citation text. Root variables are item, notePath, and annotations; Zotero metadata such as title, creators, citationKey, and year is under item. Leave empty to use the built-in template.",
+                        control: {
+                            type: "textarea",
+                            key: "citationPandocTemplate",
+                            placeholder:
+                                "e.g. [@{{ item.citationKey | default: item.key }}]",
+                            rows: 5,
+                        },
+                    },
+                    {
+                        name: "Footnote Reference Template",
+                        desc: "LiquidJS template for the inline footnote reference. Root variables are item, notePath, and annotations. Leave empty to use the built-in template.",
+                        control: {
+                            type: "textarea",
+                            key: "citationFootnoteRefTemplate",
+                            placeholder:
+                                "e.g. [^{{ item.citationKey | default: item.key }}]",
+                            rows: 5,
+                        },
+                    },
+                    {
+                        name: "Footnote Definition Template",
+                        desc: "LiquidJS template for the footnote definition(s) appended at the end of the note. Root variables are item, notePath, and annotations. Include the [^marker]: prefix yourself so each definition aligns with its reference — loop over annotations to emit one definition per annotation. A template with no [^marker]: prefix reuses the reference's marker automatically. Leave empty to use the built-in template.",
+                        control: {
+                            type: "textarea",
+                            key: "citationFootnoteTemplate",
+                            placeholder:
+                                'e.g. [^{{ item.citationKey | default: item.key }}]: {{ item.creators[0].name | default: "Unknown Author" }}, *{{ item.title }}* ({{ item.year }}).',
+                            rows: 5,
+                        },
+                    },
+                    {
+                        name: "Wikilink Template",
+                        desc: "LiquidJS template for wikilink citation text. Root variables are item, notePath, and annotations; Zotero metadata is under item. Leave empty to use the built-in template.",
+                        control: {
+                            type: "textarea",
+                            key: "citationWikilinkTemplate",
+                            placeholder:
+                                "e.g. [[{{ notePath }}|{{ item.title }}]]",
+                            rows: 5,
+                        },
+                    },
+                    {
+                        name: "Auto-copy New Annotation",
+                        desc: "When you create an annotation in the reader, automatically copy it to the clipboard. Embed inserts ![[note#^id]]; Text copies the highlighted text; Citation uses the default citation format above.",
+                        control: {
+                            type: "dropdown",
+                            key: "autoCopyAnnotation",
+                            options: {
+                                off: "Off",
+                                embed: "Embed",
+                                text: "Text",
+                                citation: "Citation",
+                            },
+                        },
+                    },
+                ],
+            },
+        ];
     }
 }

@@ -287,38 +287,6 @@
    Settings
    ============================================================ */
 
-.vertical-tab-content.zotflow-settings-tab {
-    padding-bottom: 0;
-}
-
-.zotflow-settings-title {
-    font-size: var(--font-ui-medium);
-    font-weight: var(--font-semibold);
-    margin-bottom: var(--size-4-3);
-}
-
-.zotflow-settings-container {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    width: 100%;
-    overflow: hidden;
-}
-
-/* Tab labels stay on one line; the row scrolls horizontally instead of
-   wrapping, which is what pushed "CSL Render" onto two lines. */
-.zotflow-settings-nav .nav-item {
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-.zotflow-settings-content {
-    flex: 1;
-    overflow: auto;
-    padding-top: var(--size-4-4);
-    padding-bottom: var(--size-4-4);
-}
-
 .zotflow-settings-lib-table-wrapper {
     border: 1px solid var(--background-modifier-border);
     border-radius: 6px;
@@ -382,12 +350,9 @@
     width: 100%;
 }
 
-/* Appended to the SettingGroup's container rather than to a setting item, so
-   the item's horizontal padding has to be restored or the block sits flush
-   against the card edge. Same for .zotflow-settings-btn-container below. */
 .zotflow-settings-cache-usage {
     display: block;
-    padding: 0 var(--size-4-5);
+    margin-top: var(--size-4-2);
 }
 
 .zotflow-settings-cache-info {
@@ -411,17 +376,17 @@
     transition: width 0.3s ease;
 }
 
-.zotflow-settings-btn-container {
-    margin-top: 1rem;
-    padding: 0 var(--size-4-5);
-}
-
 .zotflow-settings-table-btn-container {
     margin-top: 0.5rem;
 }
 
 .zotflow-settings-danger-btn {
     color: var(--text-error);
+}
+
+.zotflow-settings-citation textarea {
+    width: 24rem;
+    max-width: 100%;
 }
 
 .workspace-leaf-content[data-type="zotflow-tree-view"] .view-content {
@@ -580,35 +545,35 @@
    ============================================================ */
 
 .callout[data-callout^="zotflow"][data-callout$="#ffd400"] {
-    --callout-color: var(--color-yellow-rgb);
+    --callout-color: rgb(var(--color-yellow-rgb));
 }
 
 .callout[data-callout^="zotflow"][data-callout$="#ff6666"] {
-    --callout-color: var(--color-red-rgb);
+    --callout-color: rgb(var(--color-red-rgb));
 }
 
 .callout[data-callout^="zotflow"][data-callout$="#5fb236"] {
-    --callout-color: var(--color-green-rgb);
+    --callout-color: rgb(var(--color-green-rgb));
 }
 
 .callout[data-callout^="zotflow"][data-callout$="#2ea8e5"] {
-    --callout-color: var(--color-blue-rgb);
+    --callout-color: rgb(var(--color-blue-rgb));
 }
 
 .callout[data-callout^="zotflow"][data-callout$="#a28ae5"] {
-    --callout-color: var(--color-purple-rgb);
+    --callout-color: rgb(var(--color-purple-rgb));
 }
 
 .callout[data-callout^="zotflow"][data-callout$="#e56eee"] {
-    --callout-color: var(--color-pink-rgb);
+    --callout-color: rgb(var(--color-pink-rgb));
 }
 
 .callout[data-callout^="zotflow"][data-callout$="#f19837"] {
-    --callout-color: var(--color-orange-rgb);
+    --callout-color: rgb(var(--color-orange-rgb));
 }
 
 .callout[data-callout^="zotflow"][data-callout$="#aaaaaa"] {
-    --callout-color: var(--callout-quote);
+    --callout-color: #aaaaaa;
 }
 
 .callout[data-callout^="zotflow-highlight"] {

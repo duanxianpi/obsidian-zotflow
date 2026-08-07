@@ -1,160 +1,183 @@
-import { Setting, SettingGroup } from "obsidian";
-
 import { workerBridge } from "bridge";
-import { DEFAULT_SETTINGS } from "settings/types";
 import { services } from "services/services";
 
 import type ZotFlow from "main";
+import type { SettingDefinitionItem } from "obsidian";
+import type { SettingKey } from "settings/types";
 
-/** Settings section for attachment cache toggle, size limit, usage bar, and purge. */
+/** Declarative attachment cache settings and runtime usage statistics. */
 export class CacheSection {
+    private totalSizeBytes: number | undefined;
+    private updateUsage: (() => void) | undefined;
+    private loadVersion = 0;
+
     constructor(
-        private plugin: ZotFlow,
-        private refreshUI: () => void,
+        private readonly plugin: ZotFlow,
+        private readonly requestUpdate: () => void,
     ) {}
 
-    async render(containerEl: HTMLElement) {
-        const settingGroup = new SettingGroup(containerEl);
-        settingGroup.setHeading("Attachment Cache");
+    getDefinitions(): SettingDefinitionItem<SettingKey>[] {
+        const visible = () => this.plugin.settings.useCache;
+        return [
+            {
+                type: "group",
+                heading: "Attachment Cache",
+                items: [
+                    {
+                        name: "Enable Caching",
+                        desc: "Save attachments locally to improve speed and work offline.",
+                        render: (setting) => {
+                            setting.addToggle((toggle) =>
+                                toggle
+                                    .setValue(this.plugin.settings.useCache)
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.useCache = value;
+                                        await this.plugin.saveSettings();
+                                        if (!value) this.reset();
+                                        this.requestUpdate();
+                                    }),
+                            );
+                        },
+                    },
+                    {
+                        name: "Max Cache Limit (MB)",
+                        desc: "Set to 0 for unlimited.",
+                        visible,
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setValue(
+                                    String(this.plugin.settings.maxCacheSizeMB),
+                                ).onChange(async (value) => {
+                                    if (!/^\d+$/.test(value)) {
+                                        services.notificationService.notify(
+                                            "warning",
+                                            "Must be a non-negative whole number",
+                                        );
+                                        return;
+                                    }
+                                    this.plugin.settings.maxCacheSizeMB =
+                                        Number.parseInt(value, 10);
+                                    await this.plugin.saveSettings();
+                                    this.updateUsage?.();
+                                });
+                            });
+                        },
+                    },
+                    {
+                        name: "Current Cache Usage",
+                        desc: "Storage used by cached attachment files.",
+                        visible,
+                        render: (setting) => this.renderUsage(setting.infoEl),
+                    },
+                    {
+                        name: "Purge Cache",
+                        desc: "Remove all cached attachment files.",
+                        visible,
+                        render: (setting) => {
+                            setting.addButton((button) =>
+                                button
+                                    .setButtonText("Purge Cache")
+                                    .setDestructive()
+                                    .onClick(async () => {
+                                        try {
+                                            await workerBridge.attachment.purgeCache();
+                                            this.totalSizeBytes = 0;
+                                            this.updateUsage?.();
+                                            services.notificationService.notify(
+                                                "success",
+                                                "Cache purged successfully.",
+                                            );
+                                            services.logService.info(
+                                                "Cache purged successfully.",
+                                                "Settings",
+                                            );
+                                        } catch (error) {
+                                            services.notificationService.notify(
+                                                "error",
+                                                "Failed to purge cache.",
+                                            );
+                                            services.logService.error(
+                                                "Failed to purge cache",
+                                                "Settings",
+                                                error,
+                                            );
+                                        }
+                                    }),
+                            );
+                        },
+                    },
+                ],
+            },
+        ];
+    }
 
-        settingGroup.addSetting((setting) => {
-            setting.setName("Enable Caching");
-            setting.setDesc(
-                "Save attachments locally to improve speed and work offline.",
-            );
-            setting.addToggle((toggle) =>
-                toggle
-                    .setValue(this.plugin.settings.useCache)
-                    .onChange(async (value) => {
-                        this.plugin.settings.useCache = value;
-                        await this.plugin.saveSettings();
-                        this.refreshUI();
-                    }),
-            );
+    reset(): void {
+        this.totalSizeBytes = undefined;
+        this.updateUsage = undefined;
+        this.loadVersion += 1;
+    }
+
+    private renderUsage(containerEl: HTMLElement): () => void {
+        const usageContainer = containerEl.createDiv({
+            cls: "zotflow-settings-cache-usage",
+        });
+        const infoDiv = usageContainer.createDiv({
+            cls: "zotflow-settings-cache-info",
+        });
+        infoDiv.createSpan({ text: "Current Usage" });
+        const usageTextEl = infoDiv.createSpan({ text: "Calculating..." });
+        const progressBg = usageContainer.createDiv({
+            cls: "zotflow-settings-cache-progress-bg",
+        });
+        const progressFillEl = progressBg.createDiv({
+            cls: "zotflow-settings-cache-progress-fill",
         });
 
-        if (!this.plugin.settings.useCache) return;
+        const update = () => {
+            if (this.totalSizeBytes === undefined) return;
+            const totalSizeMB = (this.totalSizeBytes / (1024 * 1024)).toFixed(
+                2,
+            );
+            const limitMB = this.plugin.settings.maxCacheSizeMB;
+            const percent =
+                limitMB > 0
+                    ? (this.totalSizeBytes / (limitMB * 1024 * 1024)) * 100
+                    : 0;
+            usageTextEl.setText(
+                `${totalSizeMB} MB / ${limitMB > 0 ? `${limitMB} MB` : "Unlimited"}`,
+            );
+            progressFillEl.style.width = `${Math.min(percent, 100)}%`;
+            progressFillEl.style.backgroundColor =
+                percent > 90
+                    ? "var(--text-error)"
+                    : "var(--interactive-accent)";
+        };
 
-        // Max Size Setting.
-        //
-        // This callback must stay async. It keeps building the setting after
-        // awaiting the cache size, and Obsidian types `addSetting` as taking a
-        // `void` callback — matching that type by dropping `async` hard-freezes
-        // the app. The declaration is wrong about its own runtime here.
-        // eslint-disable-next-line @typescript-eslint/no-misused-promises -- see above
-        settingGroup.addSetting(async (setting) => {
-            setting.setName("Max Cache Limit (MB)");
-            setting.setDesc("Set to 0 for unlimited.");
-            setting.addText((text) => {
-                text.setValue(
-                    (
-                        this.plugin.settings.maxCacheSizeMB ||
-                        DEFAULT_SETTINGS.maxCacheSizeMB
-                    ).toString(),
-                ).onChange(async (value) => {
-                    if (value && !/^[0-9]+$/.test(value)) {
-                        services.notificationService.notify(
-                            "warning",
-                            "Must be a positive number",
-                        );
-                        return;
-                    }
-                    const newLimit = parseInt(value);
-                    this.plugin.settings.maxCacheSizeMB = newLimit;
-                    await this.plugin.saveSettings();
-                    updateProgressBar(newLimit);
-                });
-            });
+        this.updateUsage = update;
+        update();
 
-            // Cache Stats & Visualization
-            const cacheConfigContainer =
-                setting.settingEl.parentElement?.createDiv();
-            let totalSizeBytes = 0;
+        const loadVersion = ++this.loadVersion;
+        void (async () => {
             try {
-                totalSizeBytes =
+                const totalSizeBytes =
                     await workerBridge.attachment.getCacheTotalSizeBytes();
-            } catch (e) {
-                console.error("Cache stats error", e);
+                if (loadVersion !== this.loadVersion) return;
+                this.totalSizeBytes = totalSizeBytes;
+                update();
+            } catch (error) {
+                if (loadVersion !== this.loadVersion) return;
+                usageTextEl.setText("Unable to read cache usage");
+                services.logService.warn(
+                    "Failed to read cache usage",
+                    "Settings",
+                    error,
+                );
             }
+        })();
 
-            const usageContainer = cacheConfigContainer!.createDiv({
-                cls: "zotflow-settings-cache-usage",
-            });
-
-            const infoDiv = usageContainer.createDiv({
-                cls: "zotflow-settings-cache-info",
-            });
-            infoDiv.createSpan({ text: "Current Usage" });
-            const usageTextEl = infoDiv.createSpan({ text: "Calculating..." });
-
-            const progressBg = usageContainer.createDiv({
-                cls: "zotflow-settings-cache-progress-bg",
-            });
-
-            const progressFillEl = progressBg.createDiv({
-                cls: "zotflow-settings-cache-progress-fill",
-            });
-
-            // Logic to update bar
-            const updateProgressBar = (limitMB: number) => {
-                const totalSizeMB = (totalSizeBytes / (1024 * 1024)).toFixed(2);
-                let percent = 0;
-                let limitText = "Unlimited";
-
-                if (limitMB > 0) {
-                    percent = (totalSizeBytes / (limitMB * 1024 * 1024)) * 100;
-                    limitText = `${limitMB} MB`;
-                }
-
-                usageTextEl.setText(`${totalSizeMB} MB / ${limitText}`);
-
-                const visualPercent = Math.min(percent, 100);
-                progressFillEl.style.width = `${visualPercent}%`;
-                progressFillEl.style.backgroundColor =
-                    percent > 90
-                        ? "var(--text-error)"
-                        : "var(--interactive-accent)";
-            };
-
-            // Initialize bar
-            updateProgressBar(this.plugin.settings.maxCacheSizeMB);
-
-            // Clear Cache Button
-            const btnContainer = cacheConfigContainer!.createDiv({
-                cls: "zotflow-settings-btn-container",
-            });
-
-            new Setting(btnContainer).addButton((btn) =>
-                btn
-                    .setButtonText("Purge Cache")
-                    .setDestructive()
-                    .onClick(async () => {
-                        try {
-                            await workerBridge.attachment.purgeCache();
-                            services.notificationService.notify(
-                                "success",
-                                "Cache purged successfully.",
-                            );
-                            services.logService.info(
-                                "Cache purged successfully.",
-                                "Settings",
-                            );
-                            totalSizeBytes = 0;
-                            updateProgressBar(
-                                this.plugin.settings.maxCacheSizeMB,
-                            );
-                        } catch (error) {
-                            services.notificationService.notify(
-                                "error",
-                                "Failed to purge cache: " + String(error),
-                            );
-                            services.logService.error(
-                                "Failed to purge cache: " + String(error),
-                                "Settings",
-                            );
-                        }
-                    }),
-            );
-        });
+        return () => {
+            if (this.updateUsage === update) this.updateUsage = undefined;
+            if (loadVersion === this.loadVersion) this.loadVersion += 1;
+        };
     }
 }

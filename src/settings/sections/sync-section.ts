@@ -1,270 +1,354 @@
-import { Setting, ButtonComponent, setIcon, SettingGroup } from "obsidian";
+import { ButtonComponent, setIcon } from "obsidian";
+
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { errorMessage as describeError } from "utils/error";
 
 import type ZotFlow from "main";
-import type { LibrarySyncMode } from "settings/types";
+import type { SettingDefinitionItem } from "obsidian";
+import type { LibrarySyncMode, SettingKey } from "settings/types";
+import type { IDBZoteroKey } from "types/db-schema";
+import type { LibraryRow } from "worker/services/key";
 
-/** Settings section for API key verification and per-library sync mode configuration. */
+const MODE_LABELS: Record<LibrarySyncMode, string> = {
+    bidirectional: "Bidirectional",
+    readonly: "Read-Only",
+    ignored: "Ignored",
+};
+
+/** Declarative synchronization settings and asynchronously populated libraries. */
 export class SyncSection {
+    private keyInfo: IDBZoteroKey | undefined;
+    private keyInfoLoaded = false;
+    private keyLoadPromise: Promise<void> | undefined;
+    private keyLoadVersion = 0;
+
     constructor(
-        private plugin: ZotFlow,
-        private refreshUI: () => void,
+        private readonly plugin: ZotFlow,
+        private readonly requestUpdate: () => void,
     ) {}
 
-    async render(containerEl: HTMLElement) {
-        const settingGroup = new SettingGroup(containerEl);
-        settingGroup.setHeading("Synchronization");
+    getDefinitions(): SettingDefinitionItem<SettingKey>[] {
+        return [
+            {
+                type: "group",
+                heading: "Synchronization",
+                items: [
+                    {
+                        name: "API Key",
+                        desc: this.createApiDescription(),
+                        render: (setting) => {
+                            this.ensureKeyInfoLoaded();
+                            const loading = !this.keyInfoLoaded;
+                            setting.addText((text) => {
+                                text.setPlaceholder("Enter API Key")
+                                    .setValue(this.plugin.settings.zoteroapikey)
+                                    .setDisabled(loading || !!this.keyInfo)
+                                    .onChange((value) => {
+                                        this.plugin.settings.zoteroapikey =
+                                            value.trim();
+                                    });
+                                text.inputEl.type = this.keyInfo
+                                    ? "password"
+                                    : "text";
+                                text.inputEl.size = 30;
+                            });
 
-        // Retrieve cached key info
-        const keyInfo = await workerBridge.key.getKeyInfo(
-            this.plugin.settings.zoteroapikey,
-        );
+                            setting.addButton((button) => {
+                                button
+                                    .setButtonText(
+                                        loading
+                                            ? "Checking..."
+                                            : this.keyInfo
+                                              ? "Verified"
+                                              : "Verify Key",
+                                    )
+                                    .setCta()
+                                    .setDisabled(loading || !!this.keyInfo)
+                                    .onClick(() =>
+                                        this.handleVerifyOrRefresh(
+                                            button,
+                                            "verify",
+                                        ),
+                                    );
+                                button.buttonEl.setCssStyles({
+                                    width: "100px",
+                                });
+                            });
 
-        // Description
-        const apiDescContainer = new DocumentFragment();
-        const descDiv = apiDescContainer.createDiv();
-        if (keyInfo) {
-            descDiv.createSpan({
-                text: `Connected as ${keyInfo.username} (User ID: ${keyInfo.userID})`,
-            });
-        } else {
-            descDiv.createSpan({
-                text: "Enter your Zotero API Key. Create one via ",
-            });
-            descDiv.createEl("a", {
+                            setting.addExtraButton((button) => {
+                                button
+                                    .setIcon("trash")
+                                    .setTooltip("Disconnect & Clear Key")
+                                    .setDisabled(loading)
+                                    .onClick(async () => {
+                                        const oldKey =
+                                            this.plugin.settings.zoteroapikey;
+                                        this.plugin.settings.zoteroapikey = "";
+                                        this.plugin.settings.librariesConfig =
+                                            {};
+                                        if (oldKey) {
+                                            await workerBridge.key.deleteKey(
+                                                oldKey,
+                                            );
+                                        }
+                                        await this.plugin.saveSettings();
+                                        this.setKeyInfo(undefined);
+                                        services.notificationService.notify(
+                                            "info",
+                                            "Disconnected.",
+                                        );
+                                        this.requestUpdate();
+                                    });
+                                button.extraSettingsEl.addClass(
+                                    "zotflow-settings-danger-btn",
+                                );
+                            });
+                        },
+                    },
+                    {
+                        name: "Auto-update source notes after sync",
+                        desc: "When enabled, source notes for items changed during sync are automatically refreshed (incremental — unchanged notes are skipped).",
+                        control: {
+                            type: "toggle",
+                            key: "autoUpdateSourceNotesAfterSync",
+                        },
+                    },
+                    {
+                        name: "Auto-purge source notes for trashed items",
+                        desc: "When enabled, source notes for items moved to the Zotero trash are automatically removed (sent to the system trash) after each sync.",
+                        control: {
+                            type: "toggle",
+                            key: "autoPurgeTrashedSourceNotes",
+                        },
+                    },
+                    {
+                        name: "Library Synchronization",
+                        desc: "Manage the sync settings for each library.",
+                        visible: () => this.keyInfoLoaded && !!this.keyInfo,
+                        render: (setting) => {
+                            let disposed = false;
+                            const container = setting.infoEl.createDiv({
+                                cls: "zotflow-settings-library-container",
+                            });
+                            container.createDiv({
+                                text: "Loading libraries...",
+                                cls: "setting-item-description",
+                            });
+                            void this.renderLibrariesTable(
+                                container,
+                                () => disposed,
+                            );
+                            return () => {
+                                disposed = true;
+                            };
+                        },
+                    },
+                ],
+            },
+        ];
+    }
+
+    reset(): void {
+        this.keyInfo = undefined;
+        this.keyInfoLoaded = false;
+        this.keyLoadPromise = undefined;
+        this.keyLoadVersion += 1;
+    }
+
+    private createApiDescription(): DocumentFragment {
+        return createFragment((fragment) => {
+            if (!this.keyInfoLoaded) {
+                fragment.appendText("Checking stored Zotero API key...");
+                return;
+            }
+            if (this.keyInfo) {
+                fragment.appendText(
+                    `Connected as ${this.keyInfo.username} (User ID: ${this.keyInfo.userID})`,
+                );
+                return;
+            }
+            fragment.appendText("Enter your Zotero API Key. Create one via ");
+            fragment.createEl("a", {
                 href: "https://www.zotero.org/settings/keys/new",
                 text: "Zotero Settings",
             });
-            descDiv.createSpan({ text: "." });
-        }
-        // API Key Input
-        settingGroup.addSetting((setting) => {
-            setting
-                .setName("API Key")
-                .setDesc(apiDescContainer)
-                .addText((text) => {
-                    text.setPlaceholder("Enter API Key")
-                        .setValue(this.plugin.settings.zoteroapikey)
-                        .onChange(async (value) => {
-                            this.plugin.settings.zoteroapikey = value.trim();
-                        });
-
-                    if (keyInfo) {
-                        text.setDisabled(true);
-                        text.inputEl.type = "password";
-                    } else {
-                        text.inputEl.type = "text";
-                    }
-                    text.inputEl.size = 30;
-                });
-
-            // Verify Button
-            setting.addButton((button) => {
-                button
-                    .setButtonText(keyInfo ? "Verified" : "Verify Key")
-                    .setCta()
-                    .setDisabled(!!keyInfo)
-                    .onClick(() =>
-                        this.handleVerifyOrRefresh(button, "verify"),
-                    );
-                button.buttonEl.setCssStyles({ width: "100px" });
-            });
-
-            // Clear Button
-            setting.addExtraButton((btn) => {
-                btn.setIcon("trash")
-                    .setTooltip("Disconnect & Clear Key")
-                    .onClick(async () => {
-                        const oldKey = this.plugin.settings.zoteroapikey;
-                        this.plugin.settings.zoteroapikey = "";
-                        this.plugin.settings.librariesConfig = {};
-                        if (oldKey) await workerBridge.key.deleteKey(oldKey);
-
-                        await this.plugin.saveSettings();
-
-                        services.notificationService.notify(
-                            "info",
-                            "Disconnected.",
-                        );
-                        this.refreshUI();
-                    });
-                btn.extraSettingsEl.addClass("zotflow-settings-danger-btn");
-            });
+            fragment.appendText(".");
         });
-
-        // Auto-update source notes after sync
-        settingGroup.addSetting((setting) => {
-            setting
-                .setName("Auto-update source notes after sync")
-                .setDesc(
-                    "When enabled, source notes for items changed during sync are automatically refreshed (incremental — unchanged notes are skipped).",
-                )
-                .addToggle((toggle) => {
-                    toggle
-                        .setValue(
-                            this.plugin.settings.autoUpdateSourceNotesAfterSync,
-                        )
-                        .onChange(async (value) => {
-                            this.plugin.settings.autoUpdateSourceNotesAfterSync =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
-
-        // Auto-purge source notes for trashed items
-        settingGroup.addSetting((setting) => {
-            setting
-                .setName("Auto-purge source notes for trashed items")
-                .setDesc(
-                    "When enabled, source notes for items moved to the Zotero trash are automatically removed (sent to the system trash) after each sync.",
-                )
-                .addToggle((toggle) => {
-                    toggle
-                        .setValue(
-                            this.plugin.settings.autoPurgeTrashedSourceNotes,
-                        )
-                        .onChange(async (value) => {
-                            this.plugin.settings.autoPurgeTrashedSourceNotes =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
-
-        // Libraries Table
-        if (keyInfo) {
-            // Must stay async: the table is built by awaiting inside the
-            // callback. Obsidian types `addSetting` as taking a `void`
-            // callback, but matching that type here hard-freezes the app.
-            // eslint-disable-next-line @typescript-eslint/no-misused-promises -- see above
-            settingGroup.addSetting(async (setting) => {
-                setting.setName("Library Synchronization");
-                setting.setDesc("Manage the sync settings for each library.");
-                await this.renderLibrariesTable(setting.infoEl);
-            });
-        }
     }
 
-    private async renderLibrariesTable(containerEl: HTMLElement) {
-        // Prepare Data — the KeyService computes everything we need
-        const libraryItems = await workerBridge.key.getLibraryRows(
-            this.plugin.settings,
-        );
-
-        if (libraryItems.length === 0) {
-            containerEl.createDiv({
-                text: "No libraries found.",
-                cls: "setting-item-description",
-            });
+    private ensureKeyInfoLoaded(): void {
+        if (this.keyInfoLoaded || this.keyLoadPromise) return;
+        if (!this.plugin.settings.zoteroapikey) {
+            this.setKeyInfo(undefined);
             return;
         }
 
-        // Sync Config Logic (Auto-init)
+        const loadVersion = ++this.keyLoadVersion;
+        this.keyLoadPromise = (async () => {
+            try {
+                const keyInfo = await workerBridge.key.getKeyInfo(
+                    this.plugin.settings.zoteroapikey,
+                );
+                if (loadVersion !== this.keyLoadVersion) return;
+                this.setKeyInfo(keyInfo);
+            } catch (error) {
+                if (loadVersion !== this.keyLoadVersion) return;
+                this.setKeyInfo(undefined);
+                services.logService.warn(
+                    "Failed to read cached Zotero API key",
+                    "Settings",
+                    error,
+                );
+            } finally {
+                if (loadVersion === this.keyLoadVersion) {
+                    this.keyLoadPromise = undefined;
+                    this.requestUpdate();
+                }
+            }
+        })();
+    }
+
+    private setKeyInfo(keyInfo: IDBZoteroKey | undefined): void {
+        this.keyInfo = keyInfo;
+        this.keyInfoLoaded = true;
+    }
+
+    private async renderLibrariesTable(
+        containerEl: HTMLElement,
+        isDisposed: () => boolean,
+    ): Promise<void> {
+        try {
+            const libraryItems = await workerBridge.key.getLibraryRows(
+                this.plugin.settings,
+            );
+            if (isDisposed()) return;
+            containerEl.empty();
+
+            if (libraryItems.length === 0) {
+                containerEl.createDiv({
+                    text: "No libraries found.",
+                    cls: "setting-item-description",
+                });
+                return;
+            }
+
+            await this.initializeLibraryModes(libraryItems);
+            if (isDisposed()) return;
+
+            const tableWrapper = containerEl.createDiv({
+                cls: "zotflow-settings-lib-table-wrapper",
+            });
+            const table = tableWrapper.createEl("table", {
+                cls: "zotflow-settings-lib-table",
+            });
+            const headerRow = table.createEl("thead").createEl("tr");
+            for (const heading of ["Type", "Name", "Access", "Sync Mode"]) {
+                headerRow.createEl("th", { text: heading });
+            }
+
+            const body = table.createEl("tbody");
+            for (const library of libraryItems) {
+                this.renderLibraryRow(body, library);
+            }
+
+            const buttonContainer = containerEl.createDiv({
+                cls: "zotflow-settings-table-btn-container",
+            });
+            const refreshButton = new ButtonComponent(buttonContainer);
+            refreshButton
+                .setButtonText("Refresh Libraries")
+                .onClick(() =>
+                    this.handleVerifyOrRefresh(refreshButton, "refresh"),
+                );
+            refreshButton.buttonEl.setCssStyles({ width: "120px" });
+        } catch (error) {
+            if (isDisposed()) return;
+            containerEl.empty();
+            containerEl.createDiv({
+                text: "Unable to load libraries.",
+                cls: "setting-item-description",
+            });
+            services.logService.error(
+                "Failed to load Zotero libraries",
+                "Settings",
+                error,
+            );
+        }
+    }
+
+    private async initializeLibraryModes(
+        libraryItems: LibraryRow[],
+    ): Promise<void> {
         let dirty = false;
-        for (const lib of libraryItems) {
-            const existingConfig = this.plugin.settings.librariesConfig[lib.id];
+        for (const library of libraryItems) {
+            const existingConfig =
+                this.plugin.settings.librariesConfig[library.id];
             if (!existingConfig) {
-                this.plugin.settings.librariesConfig[lib.id] = {
-                    mode: lib.defaultMode,
+                this.plugin.settings.librariesConfig[library.id] = {
+                    mode: library.defaultMode,
                 };
                 dirty = true;
-            } else if (!lib.allowedModes.includes(existingConfig.mode)) {
-                this.plugin.settings.librariesConfig[lib.id]!.mode =
-                    lib.defaultMode;
+            } else if (!library.allowedModes.includes(existingConfig.mode)) {
+                existingConfig.mode = library.defaultMode;
                 dirty = true;
             }
         }
         if (dirty) await this.plugin.saveSettings();
+    }
 
-        const tableWrapper = containerEl.createDiv({
-            cls: "zotflow-settings-lib-table-wrapper",
+    private renderLibraryRow(
+        body: HTMLTableSectionElement,
+        library: LibraryRow,
+    ): void {
+        const row = body.createEl("tr");
+        const typeCell = row.createEl("td", {
+            cls: "zotflow-settings-lib-type-cell",
+        });
+        setIcon(typeCell, library.type === "user" ? "user" : "users");
+        typeCell.createSpan({
+            text: library.type === "user" ? " Personal" : " Group",
         });
 
-        const table = tableWrapper.createEl("table", {
-            cls: "zotflow-settings-lib-table",
-        });
+        const nameCell = row.createEl("td", { text: library.name });
+        nameCell.title = `ID: ${library.id}`;
 
-        const thead = table.createEl("thead");
-        const hRow = thead.createEl("tr");
-        ["Type", "Name", "Access", "Sync Mode"].forEach((h) => {
-            hRow.createEl("th", { text: h });
-        });
-
-        const tbody = table.createEl("tbody");
-        libraryItems.forEach((lib) => {
-            const row = tbody.createEl("tr");
-
-            const typeCell = row.createEl("td", {
-                cls: "zotflow-settings-lib-type-cell",
-            });
-            setIcon(typeCell, lib.type === "user" ? "user" : "users");
-            typeCell.createSpan({
-                text: lib.type === "user" ? " Personal" : " Group",
-            });
-
-            const nameCell = row.createEl("td", { text: lib.name });
-            nameCell.title = `ID: ${lib.id}`;
-
-            const accessCell = row.createEl("td");
-            const badgeCls = lib.canWrite
+        const accessCell = row.createEl("td");
+        const badge = accessCell.createSpan({
+            cls: library.canWrite
                 ? "zotflow-settings-access-badge zotflow-settings-access-badge--rw"
-                : "zotflow-settings-access-badge zotflow-settings-access-badge--ro";
-            const badge = accessCell.createSpan({ cls: badgeCls });
-            badge.setText(lib.canWrite ? "Read/Write" : "Read Only");
-
-            // Surface notes permission separately so users can see why note
-            // edits may be disabled even on a Read/Write library.
-            const notesLine = accessCell.createDiv({
-                cls: "zotflow-settings-access-notes",
-            });
-            notesLine.setText(
-                `Notes: ${lib.hasNotesAccess ? "\u2713" : "\u2717"}`,
-            );
-
-            const actionCell = row.createEl("td");
-            const select = actionCell.createEl("select");
-            select.className = "dropdown zotflow-settings-lib-select";
-
-            const modeLabels: Record<string, string> = {
-                bidirectional: "Bidirectional",
-                readonly: "Read-Only",
-                ignored: "Ignored",
-            };
-
-            lib.allowedModes.forEach((m) => {
-                const opt = select.createEl("option");
-                opt.value = m;
-                opt.text = modeLabels[m]!;
-            });
-
-            select.value = this.plugin.settings.librariesConfig[lib.id]!.mode;
-            select.addEventListener("change", () => {
-                this.plugin.settings.librariesConfig[lib.id]!.mode =
-                    select.value as LibrarySyncMode;
-                // Nothing awaits a DOM event handler, so the save is marked
-                // rather than awaited.
-                void this.plugin.saveSettings();
-            });
+                : "zotflow-settings-access-badge zotflow-settings-access-badge--ro",
+        });
+        badge.setText(library.canWrite ? "Read/Write" : "Read Only");
+        accessCell.createDiv({
+            cls: "zotflow-settings-access-notes",
+            text: `Notes: ${library.hasNotesAccess ? "✓" : "✗"}`,
         });
 
-        const btnContainer = containerEl.createDiv({
-            cls: "zotflow-settings-table-btn-container",
+        const select = row.createEl("td").createEl("select", {
+            cls: "dropdown zotflow-settings-lib-select",
         });
-        new Setting(btnContainer).addButton((btn) => {
-            btn.setButtonText("Refresh Libraries").onClick(() =>
-                this.handleVerifyOrRefresh(btn, "refresh"),
-            );
-            btn.buttonEl.setCssStyles({ width: "120px" });
+        for (const mode of library.allowedModes) {
+            select.createEl("option", {
+                value: mode,
+                text: MODE_LABELS[mode],
+            });
+        }
+        select.value =
+            this.plugin.settings.librariesConfig[library.id]?.mode ??
+            library.defaultMode;
+        select.addEventListener("change", () => {
+            const mode = select.value as LibrarySyncMode;
+            if (!library.allowedModes.includes(mode)) return;
+            this.plugin.settings.librariesConfig[library.id] = { mode };
+            void this.plugin.saveSettings();
         });
     }
 
     private async handleVerifyOrRefresh(
-        btn: ButtonComponent,
+        button: ButtonComponent,
         mode: "verify" | "refresh",
-    ) {
+    ): Promise<void> {
         const apiKey = this.plugin.settings.zoteroapikey;
         if (!apiKey) {
             services.notificationService.notify(
@@ -274,14 +358,14 @@ export class SyncSection {
             return;
         }
 
-        const originalText = btn.buttonEl.innerText;
-        btn.setButtonText(mode === "verify" ? "Verifying..." : "Refreshing...");
-        btn.setDisabled(true);
+        const originalText = button.buttonEl.innerText;
+        button.setButtonText(
+            mode === "verify" ? "Verifying..." : "Refreshing...",
+        );
+        button.setDisabled(true);
 
         try {
-            // Verify key & persist key/groups/libraries via worker
             const result = await workerBridge.key.verifyAndPersistKey(apiKey);
-
             services.notificationService.notify(
                 "success",
                 mode === "verify"
@@ -289,8 +373,8 @@ export class SyncSection {
                     : "Libraries refreshed.",
             );
             await this.plugin.saveSettings();
-
-            this.refreshUI();
+            this.reset();
+            this.ensureKeyInfoLoaded();
         } catch (error) {
             services.logService.error(
                 `Zotero API ${mode} failed`,
@@ -303,11 +387,10 @@ export class SyncSection {
             );
             if (mode === "verify") {
                 this.plugin.settings.librariesConfig = {};
-                // Even on failure, refresh to unlock inputs if needed
-                this.refreshUI();
+                this.requestUpdate();
             } else {
-                btn.setButtonText(originalText);
-                btn.setDisabled(false);
+                button.setButtonText(originalText);
+                button.setDisabled(false);
             }
         }
     }

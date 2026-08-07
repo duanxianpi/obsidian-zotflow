@@ -65,6 +65,7 @@ export default class ZotFlow extends Plugin {
     viewStates: Record<string, ViewStateEntry>;
     customThemes: CustomReaderTheme[] = [];
     cslFolder: CslFolderService;
+    private zotFlowSettingTab: ZotFlowSettingTab | undefined;
     private citationSuggest: CitationSuggest;
     private sourceNoteActionElements = new WeakMap<MarkdownView, HTMLElement>();
 
@@ -416,7 +417,8 @@ export default class ZotFlow extends Plugin {
             },
         });
 
-        this.addSettingTab(new ZotFlowSettingTab(this.app, this));
+        this.zotFlowSettingTab = new ZotFlowSettingTab(this.app, this);
+        this.addSettingTab(this.zotFlowSettingTab);
 
         // Track file renames to keep viewStates and .zf.json sidecar in sync
         this.registerEvent(
@@ -554,6 +556,20 @@ export default class ZotFlow extends Plugin {
 
         // Load sensitive credentials from SecretStorage (cross-platform safe)
         loadCredentials(this.settings, this.app.secretStorage);
+    }
+
+    async onExternalSettingsChange() {
+        await this.loadSettings();
+        workerBridge.updateSettings(this.settings);
+        services.updateSettings(this.settings);
+        services.viewStateService.setViewStates(this.viewStates);
+        services.viewStateService.setCustomThemes(this.customThemes);
+        if (this.cslFolder) {
+            this.cslFolder.setFolder(this.settings.cslStylesFolder);
+            await this.cslFolder.rescan();
+        }
+        this.applyEditableRegionMarkerVisibility();
+        this.zotFlowSettingTab?.refreshFromSettings();
     }
 
     async saveSettings() {

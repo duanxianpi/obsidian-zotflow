@@ -6,19 +6,7 @@ export type LibrarySyncMode = "bidirectional" | "readonly" | "ignored";
 
 /** Reader color scheme mode. */
 export type ReaderColorScheme =
-    | "light"
-    | "dark"
-    | "obsidian"
-    | "obsidian-theme";
-
-/** Settings tab identifier. */
-export type TabSection =
-    | "sync"
-    | "webdav"
-    | "cache"
-    | "general"
-    | "citation"
-    | "csl";
+    "light" | "dark" | "obsidian" | "obsidian-theme";
 
 /** Sort order for collections in the tree view. */
 export type CollectionSortOrder = "name-asc" | "name-desc";
@@ -94,6 +82,9 @@ export interface ZotFlowSettings {
     /** Vault-relative folder scanned for custom .csl styles; "" disables. */
     cslStylesFolder: string;
 }
+
+/** Top-level key addressable by Obsidian's declarative settings controls. */
+export type SettingKey = Extract<keyof ZotFlowSettings, string>;
 
 /** Re-exported so main-thread settings UI can reference the format union. */
 export type { CslOutputFormat };

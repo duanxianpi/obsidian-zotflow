@@ -1,397 +1,243 @@
-import { SettingGroup } from "obsidian";
-import ZotFlow from "main";
-import type { ReaderColorScheme } from "settings/types";
 import { services } from "services/services";
 
-/** Settings section rendering source note paths, folders, and local reader options. */
-export class GeneralSection {
-    plugin: ZotFlow;
-    refreshUI: () => void;
+import type ZotFlow from "main";
+import type { SettingDefinitionItem } from "obsidian";
+import type { SettingKey } from "settings/types";
 
-    constructor(plugin: ZotFlow, refreshUI: () => void) {
-        this.plugin = plugin;
-        this.refreshUI = refreshUI;
+/** Declarative settings for source notes, attachments, and the reader. */
+export class GeneralSection {
+    constructor(private readonly plugin: ZotFlow) {}
+
+    getDefinitions(): SettingDefinitionItem<SettingKey>[] {
+        return [
+            {
+                type: "group",
+                heading: "Library Source Note",
+                items: [
+                    {
+                        name: "Template Path",
+                        desc: "Path to template file for library source notes (relative to vault root).",
+                        control: {
+                            type: "text",
+                            key: "librarySourceNoteTemplatePath",
+                            placeholder: "e.g. templates/SourceNoteTemplate.md",
+                        },
+                    },
+                    {
+                        name: "Library Source Note Path Template",
+                        desc: "LiquidJS template for library source note file path (without .md extension).",
+                        control: {
+                            type: "text",
+                            key: "librarySourceNotePathTemplate",
+                            placeholder:
+                                "e.g. References/{{libraryName}}/@{{citationKey | default: key}}",
+                        },
+                    },
+                    {
+                        name: "Convert Item Note Links",
+                        desc: "Show links inside item notes as ZotFlow links in Obsidian while storing and syncing them as native Zotero links — clicks open ZotFlow's reader here and Zotero's reader there.",
+                        control: {
+                            type: "toggle",
+                            key: "convertNoteLinks",
+                        },
+                    },
+                    {
+                        name: "Lock Editable Regions by Default",
+                        desc: "When enabled, editable regions in source notes start locked. Click the lock icon on a region to unlock it for editing.",
+                        control: {
+                            type: "toggle",
+                            key: "defaultEditableRegionLocked",
+                        },
+                    },
+                    {
+                        name: "Hide Editable Region Markers",
+                        desc: "Hide the ZF_NOTE and ZF_PERSIST comment tags in source notes. The lock icon and region border remain visible.",
+                        control: {
+                            type: "toggle",
+                            key: "hideEditableRegionMarkers",
+                        },
+                    },
+                    {
+                        name: "Always Open Child Notes in Note Editor",
+                        desc: "When enabled, child notes always open in the standalone Note Editor view (experimental). When disabled (default), child notes open in their parent's source note, scrolled to the note's editable region.",
+                        control: {
+                            type: "toggle",
+                            key: "alwaysOpenChildNoteInEditor",
+                        },
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "Local Source Note",
+                items: [
+                    {
+                        name: "Source Note Template Path",
+                        desc: "Path to template file for local source notes (relative to vault root).",
+                        control: {
+                            type: "text",
+                            key: "localSourceNoteTemplatePath",
+                            placeholder:
+                                "e.g. templates/LocalSourceNoteTemplate.md",
+                        },
+                    },
+                    {
+                        name: "Local Source Note Path Template",
+                        desc: "LiquidJS template for local source note file path (without .md extension).",
+                        control: {
+                            type: "text",
+                            key: "localSourceNotePathTemplate",
+                            placeholder: "e.g. Local/@{{basename}}",
+                        },
+                    },
+                    {
+                        name: "Annotation Sidecar Folder",
+                        desc: "Folder for local annotation sidecar files (.zf.json), relative to vault root. Leave empty to store sidecars next to each attachment. When set, the original folder structure is mirrored under this folder to avoid filename collisions.",
+                        control: {
+                            type: "text",
+                            key: "localSidecarFolder",
+                            placeholder: "e.g. .zotflow/sidecars",
+                        },
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "Linked Attachments",
+                items: [
+                    {
+                        name: "Linked Attachment Base Directory",
+                        desc: 'Absolute path to the base directory for Zotero linked attachments (LABD). Set this to match the "Linked Attachment Base Directory" configured in Zotero (Preferences → Advanced → Files and Folders). Required for opening attachments whose path starts with "attachments:".',
+                        control: {
+                            type: "text",
+                            key: "linkedAttachmentBaseDir",
+                            placeholder:
+                                "e.g. D:\\Papers or /Users/name/Papers",
+                        },
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "General Settings",
+                items: [
+                    {
+                        name: "Open Items on Single Click",
+                        desc: "In the tree view, clicking an item's title directly opens it (source note, attachment, or note preview) and only the chevron expands/collapses. When disabled, a click toggles expansion and a double click opens attachments and notes.",
+                        control: {
+                            type: "toggle",
+                            key: "treeSingleClickOpen",
+                        },
+                    },
+                    {
+                        name: "Auto Import Annotation Images",
+                        desc: "Auto import annotation images for area and ink annotations from PDF when creating source notes.",
+                        control: {
+                            type: "toggle",
+                            key: "autoImportAnnotationImages",
+                        },
+                    },
+                    {
+                        name: "Annotation Image Folder",
+                        desc: "Default folder for annotation images (relative to vault root).",
+                        control: {
+                            type: "text",
+                            key: "annotationImageFolder",
+                            placeholder: "e.g. Attachments/ZotFlow",
+                        },
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "Zotero Reader",
+                items: [
+                    {
+                        name: "Overwrite PDF/EPUB/HTML Viewer",
+                        desc: "Overwrite PDF/EPUB/HTML viewer with local Zotero reader (Requires Restart).",
+                        control: {
+                            type: "toggle",
+                            key: "overwriteViewer",
+                        },
+                    },
+                    {
+                        name: "Turn off note, text, and image annotation tools after each use",
+                        desc: "When enabled, the note, text, and image tools automatically revert to the pointer after creating an annotation. Requires restart Reader to apply.",
+                        control: {
+                            type: "toggle",
+                            key: "autoDisableNoteImageTextTools",
+                        },
+                    },
+                    {
+                        name: "Ebook Font",
+                        desc: "Custom font family for EPUB documents. Leave empty to use the book's own font. This description text renders in the selected font as a live preview. Requires restart Reader to apply.",
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setPlaceholder("e.g. Georgia, serif")
+                                    .setValue(
+                                        this.plugin.settings.epubFontFamily,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.epubFontFamily =
+                                            value;
+                                        setting.descEl.style.fontFamily =
+                                            value || "";
+                                        await this.plugin.saveSettings();
+                                    });
+                            });
+                            setting.descEl.style.fontFamily =
+                                this.plugin.settings.epubFontFamily || "";
+                        },
+                    },
+                    {
+                        name: "Reader UI Color Scheme",
+                        desc: "Color scheme for the Zotero Reader UI.",
+                        control: {
+                            type: "dropdown",
+                            key: "readerColorScheme",
+                            options: {
+                                light: "Light",
+                                dark: "Dark",
+                                obsidian: "Adapt to Obsidian Scheme",
+                                "obsidian-theme":
+                                    "Adapt to Obsidian Scheme (Theme)",
+                            },
+                        },
+                    },
+                    {
+                        name: "Default Viewer Light Theme",
+                        desc: "Default viewer theme when the reader is in light mode.",
+                        control: {
+                            type: "dropdown",
+                            key: "defaultLightTheme",
+                            options: this.getThemeOptions(false),
+                        },
+                    },
+                    {
+                        name: "Default Viewer Dark Theme",
+                        desc: "Default viewer theme when the reader is in dark mode.",
+                        control: {
+                            type: "dropdown",
+                            key: "defaultDarkTheme",
+                            options: this.getThemeOptions(true),
+                        },
+                    },
+                ],
+            },
+        ];
     }
 
-    render(containerEl: HTMLElement) {
-        const zoteroSourceNote = new SettingGroup(containerEl);
-        zoteroSourceNote.setHeading("Library Source Note");
-
-        zoteroSourceNote.addSetting((setting) => {
-            setting
-                .setName("Template Path")
-                .setDesc(
-                    "Path to template file for library source notes (relative to vault root).",
-                )
-                .addText((text) => {
-                    text.setPlaceholder("e.g. templates/SourceNoteTemplate.md")
-                        .setValue(
-                            this.plugin.settings.librarySourceNoteTemplatePath,
-                        )
-                        .onChange(async (value) => {
-                            this.plugin.settings.librarySourceNoteTemplatePath =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 40;
-                });
-        });
-
-        zoteroSourceNote.addSetting((setting) => {
-            setting
-                .setName("Library Source Note Path Template")
-                .setDesc(
-                    "LiquidJS template for library source note file path (without .md extension).",
-                )
-                .addText((text) => {
-                    text.setPlaceholder(
-                        "e.g. References/{{libraryName}}/@{{citationKey | default: key}}",
-                    )
-                        .setValue(
-                            this.plugin.settings.librarySourceNotePathTemplate,
-                        )
-                        .onChange(async (value) => {
-                            this.plugin.settings.librarySourceNotePathTemplate =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 40;
-                });
-        });
-
-        zoteroSourceNote.addSetting((setting) => {
-            setting
-                .setName("Convert Item Note Links")
-                .setDesc(
-                    "Show links inside item notes as ZotFlow links in Obsidian while storing and syncing them as native Zotero links — clicks open ZotFlow's reader here and Zotero's reader there.",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(this.plugin.settings.convertNoteLinks);
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.convertNoteLinks = value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        zoteroSourceNote.addSetting((setting) => {
-            setting
-                .setName("Lock Editable Regions by Default")
-                .setDesc(
-                    "When enabled, editable regions in source notes start locked. Click the lock icon on a region to unlock it for editing.",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(
-                        this.plugin.settings.defaultEditableRegionLocked,
-                    );
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.defaultEditableRegionLocked =
-                            value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        zoteroSourceNote.addSetting((setting) => {
-            setting
-                .setName("Hide Editable Region Markers")
-                .setDesc(
-                    "Hide the ZF_NOTE and ZF_PERSIST comment tags in source notes. The lock icon and region border remain visible.",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(
-                        this.plugin.settings.hideEditableRegionMarkers,
-                    );
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.hideEditableRegionMarkers = value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        zoteroSourceNote.addSetting((setting) => {
-            setting
-                .setName("Always Open Child Notes in Note Editor")
-                .setDesc(
-                    "When enabled, child notes always open in the standalone Note Editor view (experimental). When disabled (default), child notes open in their parent's source note, scrolled to the note's editable region.",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(
-                        this.plugin.settings.alwaysOpenChildNoteInEditor,
-                    );
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.alwaysOpenChildNoteInEditor =
-                            value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        const localSourceNote = new SettingGroup(containerEl);
-        localSourceNote.setHeading("Local Source Note");
-
-        localSourceNote.addSetting((setting) => {
-            setting
-                .setName("Source Note Template Path")
-                .setDesc(
-                    "Path to template file for local source notes (relative to vault root).",
-                )
-                .addText((text) => {
-                    text.setPlaceholder(
-                        "e.g. templates/LocalSourceNoteTemplate.md",
-                    )
-                        .setValue(
-                            this.plugin.settings.localSourceNoteTemplatePath,
-                        )
-                        .onChange(async (value) => {
-                            this.plugin.settings.localSourceNoteTemplatePath =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 40;
-                });
-        });
-
-        localSourceNote.addSetting((setting) => {
-            setting
-                .setName("Local Source Note Path Template")
-                .setDesc(
-                    "LiquidJS template for local source note file path (without .md extension).",
-                )
-                .addText((text) => {
-                    text.setPlaceholder("e.g. Local/@{{basename}}")
-                        .setValue(
-                            this.plugin.settings.localSourceNotePathTemplate,
-                        )
-                        .onChange(async (value) => {
-                            this.plugin.settings.localSourceNotePathTemplate =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 40;
-                });
-        });
-
-        localSourceNote.addSetting((setting) => {
-            setting
-                .setName("Annotation Sidecar Folder")
-                .setDesc(
-                    "Folder for local annotation sidecar files (.zf.json), relative to vault root. " +
-                        "Leave empty to store sidecars next to each attachment. " +
-                        "When set, the original folder structure is mirrored under this folder " +
-                        "to avoid filename collisions.",
-                )
-                .addText((text) => {
-                    text.setPlaceholder("e.g. .zotflow/sidecars")
-                        .setValue(this.plugin.settings.localSidecarFolder)
-                        .onChange(async (value) => {
-                            this.plugin.settings.localSidecarFolder = value;
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 40;
-                });
-        });
-
-        const linkedAttachmentGroup = new SettingGroup(containerEl);
-        linkedAttachmentGroup.setHeading("Linked Attachments");
-
-        linkedAttachmentGroup.addSetting((setting) => {
-            setting
-                .setName("Linked Attachment Base Directory")
-                .setDesc(
-                    "Absolute path to the base directory for Zotero linked attachments (LABD). " +
-                        'Set this to match the "Linked Attachment Base Directory" configured in ' +
-                        "Zotero (Preferences → Advanced → Files and Folders). Required for opening " +
-                        'attachments whose path starts with "attachments:".',
-                )
-                .addText((text) => {
-                    text.setPlaceholder("e.g. D:\\Papers or /Users/name/Papers")
-                        .setValue(this.plugin.settings.linkedAttachmentBaseDir)
-                        .onChange(async (value) => {
-                            this.plugin.settings.linkedAttachmentBaseDir =
-                                value;
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 40;
-                });
-        });
-
-        const generalSettingGroup = new SettingGroup(containerEl);
-        generalSettingGroup.setHeading("General Settings");
-
-        generalSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Open Items on Single Click")
-                .setDesc(
-                    "In the tree view, clicking an item's title directly opens it (source note, attachment, or note preview) and only the chevron expands/collapses. When disabled, a click toggles expansion and a double click opens attachments and notes.",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(this.plugin.settings.treeSingleClickOpen);
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.treeSingleClickOpen = value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        generalSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Auto Import Annotation Images")
-                .setDesc(
-                    "Auto import annotation images for area and ink annotations from PDF when creating source notes.",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(
-                        this.plugin.settings.autoImportAnnotationImages,
-                    );
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.autoImportAnnotationImages = value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        generalSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Annotation Image Folder")
-                .setDesc(
-                    "Default folder for annotation images (relative to vault root).",
-                )
-                .addText((text) => {
-                    text.setPlaceholder("e.g. Attachments/ZotFlow")
-                        .setValue(this.plugin.settings.annotationImageFolder)
-                        .onChange(async (value) => {
-                            this.plugin.settings.annotationImageFolder = value;
-                            await this.plugin.saveSettings();
-                        });
-                    text.inputEl.size = 40;
-                });
-        });
-
-        const zoteroReaderSettingGroup = new SettingGroup(containerEl);
-        zoteroReaderSettingGroup.setHeading("Zotero Reader");
-
-        zoteroReaderSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Overwrite PDF/EPUB/HTML Viewer")
-                .setDesc(
-                    "Overwrite PDF/EPUB/HTML viewer with local Zotero reader (Requires Restart).",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(this.plugin.settings.overwriteViewer);
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.overwriteViewer = value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        zoteroReaderSettingGroup.addSetting((setting) => {
-            setting
-                .setName(
-                    "Turn off note, text, and image annotation tools after each use",
-                )
-                .setDesc(
-                    "When enabled, the note, text, and image tools automatically revert to the pointer after creating an annotation. Requires restart Reader to apply.",
-                )
-                .addToggle((toggle) => {
-                    toggle.setValue(
-                        this.plugin.settings.autoDisableNoteImageTextTools,
-                    );
-                    toggle.onChange(async (value) => {
-                        this.plugin.settings.autoDisableNoteImageTextTools =
-                            value;
-                        await this.plugin.saveSettings();
-                    });
-                });
-        });
-
-        zoteroReaderSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Ebook Font")
-                .setDesc(
-                    "Custom font family for EPUB documents. Leave empty to use the book's own font. This description text renders in the selected font as a live preview. Requires restart Reader to apply.",
-                )
-                .addText((text) => {
-                    text.setPlaceholder("e.g. Georgia, serif");
-                    text.setValue(this.plugin.settings.epubFontFamily);
-                    text.onChange(async (value) => {
-                        this.plugin.settings.epubFontFamily = value;
-                        setting.descEl.style.fontFamily = value || "";
-                        await this.plugin.saveSettings();
-                    });
-                });
-            setting.descEl.style.fontFamily =
-                this.plugin.settings.epubFontFamily || "";
-        });
-
-        zoteroReaderSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Reader UI Color Scheme")
-                .setDesc("Color scheme for the Zotero Reader UI.")
-                .addDropdown((dropdown) => {
-                    dropdown
-                        .addOption("light", "Light")
-                        .addOption("dark", "Dark")
-                        .addOption("obsidian", "Adapt to Obsidian Scheme")
-                        .addOption(
-                            "obsidian-theme",
-                            "Adapt to Obsidian Scheme (Theme)",
-                        )
-                        .setValue(this.plugin.settings.readerColorScheme)
-                        .onChange(async (value) => {
-                            this.plugin.settings.readerColorScheme =
-                                value as ReaderColorScheme;
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
-
-        zoteroReaderSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Default Viewer Light Theme")
-                .setDesc(
-                    "Default viewer theme when the reader is in light mode.",
-                )
-                .addDropdown((dropdown) => {
-                    dropdown.addOption("original_fallback", "Original");
-                    dropdown.addOption("dark", "Dark");
-                    dropdown.addOption("snow", "Snow");
-                    dropdown.addOption("sepia", "Sepia");
-                    for (const t of services.viewStateService.getCustomThemes()) {
-                        dropdown.addOption(t.id, t.label);
-                    }
-                    dropdown
-                        .setValue(this.plugin.settings.defaultLightTheme)
-                        .onChange(async (value) => {
-                            this.plugin.settings.defaultLightTheme = value;
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
-
-        zoteroReaderSettingGroup.addSetting((setting) => {
-            setting
-                .setName("Default Viewer Dark Theme")
-                .setDesc(
-                    "Default viewer theme when the reader is in dark mode.",
-                )
-                .addDropdown((dropdown) => {
-                    dropdown.addOption("original_fallback", "Original");
-                    dropdown.addOption("dark", "Dark");
-                    dropdown.addOption("snow", "Snow");
-                    dropdown.addOption("sepia", "Sepia");
-                    dropdown.addOption("obsidian", "Obsidian");
-                    for (const t of services.viewStateService.getCustomThemes()) {
-                        dropdown.addOption(t.id, t.label);
-                    }
-                    dropdown
-                        .setValue(this.plugin.settings.defaultDarkTheme)
-                        .onChange(async (value) => {
-                            this.plugin.settings.defaultDarkTheme = value;
-                            await this.plugin.saveSettings();
-                        });
-                });
-        });
+    private getThemeOptions(includeObsidian: boolean): Record<string, string> {
+        const options: [string, string][] = [
+            ["original_fallback", "Original"],
+            ["dark", "Dark"],
+            ["snow", "Snow"],
+            ["sepia", "Sepia"],
+        ];
+        if (includeObsidian) options.push(["obsidian", "Obsidian"]);
+        for (const theme of services.viewStateService.getCustomThemes()) {
+            options.push([theme.id, theme.label]);
+        }
+        return Object.fromEntries(options);
     }
 }
