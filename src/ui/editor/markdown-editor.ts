@@ -331,7 +331,7 @@ export class EmbeddableMarkdownEditor {
                     (oldMethod) =>
                     (...args) => {
                         if (!this.activeCM.hasFocus) {
-                            oldMethod(...args);
+                            oldMethod.apply(app.workspace, args);
                         }
                     },
             }),
