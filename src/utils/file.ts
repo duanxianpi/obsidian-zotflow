@@ -60,7 +60,7 @@ export async function ensureFolderExists(app: App, folderPath: string) {
 async function saveFileInternal(
     app: App,
     filePath: string,
-    data: any,
+    data: string | ArrayBuffer,
     isBinary: boolean,
 ): Promise<TFile | null> {
     const normalizedPath = normalizePath(filePath);
@@ -154,7 +154,7 @@ export async function checkFile(
 ): Promise<{
     exists: boolean;
     path: string;
-    frontmatter?: Record<string, any>;
+    frontmatter?: Record<string, unknown>;
 }> {
     const normalizedPath = normalizePath(path);
 
@@ -257,7 +257,9 @@ export async function deleteFile(app: App, path: string): Promise<void> {
 
     const file = app.vault.getAbstractFileByPath(normalizedPath);
     if (file && file instanceof TFile) {
-        await app.vault.trash(file, true);
+        // `trashFile` follows the vault's own deletion setting; `vault.trash`
+        // would force the system bin regardless of what the user chose.
+        await app.fileManager.trashFile(file);
     }
 }
 
@@ -277,8 +279,10 @@ export function getLinkedLocalSourceNote(
         if (!sourceFile || !(sourceFile instanceof TFile)) continue;
 
         const cache = app.metadataCache.getFileCache(sourceFile);
-        const fmLink = cache?.frontmatter?.["zotflow-local-attachment"];
-        if (!fmLink) continue;
+        // Frontmatter holds whatever the user typed; anything but a link
+        // string is not something `extractPathFromLink` can read.
+        const fmLink: unknown = cache?.frontmatter?.["zotflow-local-attachment"];
+        if (typeof fmLink !== "string" || !fmLink) continue;
 
         const dest = app.metadataCache.getFirstLinkpathDest(
             extractPathFromLink(fmLink),

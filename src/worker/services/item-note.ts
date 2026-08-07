@@ -10,7 +10,7 @@ import type { IDBZoteroItem } from "types/db-schema";
 import type { NoteData } from "types/zotero-item";
 import type { IParentProxy } from "bridge/types";
 import type { ConvertService } from "./convert";
-import type { LibraryNoteService, UpdateOptions } from "./library-note";
+import type { LibraryNoteService } from "./library-note";
 import type { ZotFlowSettings } from "settings/types";
 
 /**
@@ -52,7 +52,7 @@ export class ItemNoteService {
             return "";
         }
 
-        const html: string = (item.raw.data as any).note ?? "";
+        const html: string = item.raw.data.note ?? "";
         if (!html.trim()) return "";
 
         const vaultConfig = await this.parentHost.getVaultConfig();
@@ -206,10 +206,10 @@ export class ItemNoteService {
             );
         }
 
-        (updatedRaw.data as any).note = noteHtmlContent;
+        updatedRaw.data.note = noteHtmlContent;
 
         // Derive title from the updated HTML (same logic as normalize.ts)
-        const noteHtml: string = (updatedRaw.data as any).note ?? "";
+        const noteHtml: string = updatedRaw.data.note ?? "";
         const plainText = noteHtml.replace(/<[^>]+>/g, " ");
         const title =
             (plainText.split("\n")[0] ?? plainText).slice(0, 50).trim() ||
@@ -271,9 +271,9 @@ export class ItemNoteService {
         let len = 8;
         let allowedKeyChars = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
 
-        var randomstring = "";
-        for (var i = 0; i < len; i++) {
-            var rnum = Math.floor(Math.random() * allowedKeyChars.length);
+        let randomstring = "";
+        for (let i = 0; i < len; i++) {
+            let rnum = Math.floor(Math.random() * allowedKeyChars.length);
             randomstring += allowedKeyChars.substring(rnum, rnum + 1);
         }
         return randomstring;

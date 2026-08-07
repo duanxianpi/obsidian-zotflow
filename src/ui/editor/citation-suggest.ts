@@ -85,7 +85,11 @@ export class CitationSuggest extends EditorSuggest<SuggestionItem> {
         view.editor.setCursor({ line: cursor.line, ch: cursor.ch + t.length });
         this.manualTriggerStart = cursor;
         // Force Obsidian to evaluate onTrigger() immediately
-        (this as any).trigger(view.editor, activeFile, true);
+        (
+            this as typeof this & {
+                trigger(editor: Editor, file: TFile, manual: boolean): void;
+            }
+        ).trigger(view.editor, activeFile, true);
     }
 
     onTrigger(
@@ -154,11 +158,10 @@ export class CitationSuggest extends EditorSuggest<SuggestionItem> {
     // --- Helpers ---
 
     private pickWithFormat(evt: KeyboardEvent, format: CitationFormat): void {
-        // @ts-expect-error
-        // Undocumented: PopoverSuggest.suggestions holds the Suggest instance with selectedItem
         const suggestions = this.suggestions;
         const selectedIndex: number | undefined = suggestions?.selectedItem;
-        const values: SuggestionItem[] | undefined = suggestions?.values;
+        const values = suggestions?.values as unknown as
+            SuggestionItem[] | undefined;
 
         if (
             selectedIndex == null ||

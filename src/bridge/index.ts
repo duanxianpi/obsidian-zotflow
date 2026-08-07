@@ -1,5 +1,4 @@
 import * as Comlink from "comlink";
-// @ts-expect-error esbuild virtual module "virtual:worker"
 import workerCode from "virtual:worker";
 import { ParentHost } from "./parent-host";
 import { getBlobUrls } from "bundle-assets/inline-assets";
@@ -32,7 +31,6 @@ import type { CslRenderWorkerService } from "worker/services/csl-render";
 import type { BatchNoteInput } from "worker/tasks/impl/batch-note-task";
 import type {
     BatchExtractImagesInput,
-    ItemIdentifier,
 } from "worker/tasks/impl/batch-extract-images-task";
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
@@ -44,32 +42,36 @@ import type { AttachmentIdentifier } from "worker/tasks/impl/batch-extract-exter
 import { services } from "services/services";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
+function materializeComlinkProxy<T>(proxy: T): Promise<Awaited<T>> {
+    return Promise.resolve(proxy);
+}
+
 /** Comlink-based RPC wrapper managing the Web Worker lifecycle and exposing all worker service proxies. */
 export class WorkerBridge {
     private _worker: Worker;
 
     private _api: Comlink.Remote<WorkerAPI>;
 
-    private _attachment: AttachmentService;
-    private _sync: SyncService;
-    private _zotero: ZoteroAPIService;
-    private _webdav: WebDavService;
-    private _treeView: TreeViewService;
-    private _libraryNote: LibraryNoteService;
-    private _itemNote: ItemNoteService;
-    private _localNote: LocalNoteService;
-    private _conflict: ConflictService;
-    private _annotation: AnnotationService;
-    private _key: KeyService;
-    private _library: LibraryService;
-    private _dbHelper: DbHelperService;
-    private _tag: TagService;
-    private _pdfProcessor: PDFProcessWorker;
-    private _libraryTemplate: LibraryTemplateService;
-    private _localTemplate: LocalTemplateService;
-    private _notePath: NotePathService;
-    private _cslRender: CslRenderWorkerService;
-    private _tasks: TaskManager;
+    private _attachment: Comlink.Remote<AttachmentService>;
+    private _sync: Comlink.Remote<SyncService>;
+    private _zotero: Comlink.Remote<ZoteroAPIService>;
+    private _webdav: Comlink.Remote<WebDavService>;
+    private _treeView: Comlink.Remote<TreeViewService>;
+    private _libraryNote: Comlink.Remote<LibraryNoteService>;
+    private _itemNote: Comlink.Remote<ItemNoteService>;
+    private _localNote: Comlink.Remote<LocalNoteService>;
+    private _conflict: Comlink.Remote<ConflictService>;
+    private _annotation: Comlink.Remote<AnnotationService>;
+    private _key: Comlink.Remote<KeyService>;
+    private _library: Comlink.Remote<LibraryService>;
+    private _dbHelper: Comlink.Remote<DbHelperService>;
+    private _tag: Comlink.Remote<TagService>;
+    private _pdfProcessor: Comlink.Remote<PDFProcessWorker>;
+    private _libraryTemplate: Comlink.Remote<LibraryTemplateService>;
+    private _localTemplate: Comlink.Remote<LocalTemplateService>;
+    private _notePath: Comlink.Remote<NotePathService>;
+    private _cslRender: Comlink.Remote<CslRenderWorkerService>;
+    private _tasks: Comlink.Remote<TaskManager>;
 
     private _workerBlobUrl: string;
     private _initialized = false;
@@ -92,26 +94,37 @@ export class WorkerBridge {
             blobUrls,
         );
 
-        this._attachment = await this._api.attachment;
-        this._sync = await this._api.sync;
-        this._zotero = await this._api.zotero;
-        this._webdav = await this._api.webdav;
-        this._treeView = await this._api.treeView;
-        this._libraryNote = await this._api.libraryNote;
-        this._itemNote = await this._api.itemNote;
-        this._localNote = await this._api.localNote;
-        this._conflict = await this._api.conflict;
-        this._annotation = await this._api.annotation;
-        this._key = await this._api.key;
-        this._library = await this._api.library;
-        this._dbHelper = await this._api.dbHelper;
-        this._tag = await this._api.tag;
-        this._pdfProcessor = await this._api.pdfProcessor;
-        this._libraryTemplate = await this._api.libraryTemplate;
-        this._localTemplate = await this._api.localTemplate;
-        this._notePath = await this._api.notePath;
-        this._cslRender = await this._api.cslRender;
-        this._tasks = await this._api.tasks;
+        // Promise.resolve performs the same thenable assimilation as `await`.
+        // Comlink's runtime `then` trap materialises each dedicated MessagePort,
+        // although its TypeScript types do not expose that thenable shape.
+        this._attachment = await materializeComlinkProxy(this._api.attachment);
+        this._sync = await materializeComlinkProxy(this._api.sync);
+        this._zotero = await materializeComlinkProxy(this._api.zotero);
+        this._webdav = await materializeComlinkProxy(this._api.webdav);
+        this._treeView = await materializeComlinkProxy(this._api.treeView);
+        this._libraryNote = await materializeComlinkProxy(
+            this._api.libraryNote,
+        );
+        this._itemNote = await materializeComlinkProxy(this._api.itemNote);
+        this._localNote = await materializeComlinkProxy(this._api.localNote);
+        this._conflict = await materializeComlinkProxy(this._api.conflict);
+        this._annotation = await materializeComlinkProxy(this._api.annotation);
+        this._key = await materializeComlinkProxy(this._api.key);
+        this._library = await materializeComlinkProxy(this._api.library);
+        this._dbHelper = await materializeComlinkProxy(this._api.dbHelper);
+        this._tag = await materializeComlinkProxy(this._api.tag);
+        this._pdfProcessor = await materializeComlinkProxy(
+            this._api.pdfProcessor,
+        );
+        this._libraryTemplate = await materializeComlinkProxy(
+            this._api.libraryTemplate,
+        );
+        this._localTemplate = await materializeComlinkProxy(
+            this._api.localTemplate,
+        );
+        this._notePath = await materializeComlinkProxy(this._api.notePath);
+        this._cslRender = await materializeComlinkProxy(this._api.cslRender);
+        this._tasks = await materializeComlinkProxy(this._api.tasks);
 
         this._initialized = true;
         services.logService.log(
@@ -277,11 +290,11 @@ export class WorkerBridge {
 
     cancelTask(taskId: string): void {
         this.assertInitialized();
-        this._api.cancelTask(taskId);
+        void this._api.cancelTask(taskId);
     }
 
     updateSettings(newSettings: ZotFlowSettings) {
-        this._api.updateSettings(newSettings);
+        void this._api.updateSettings(newSettings);
     }
 
     terminate() {

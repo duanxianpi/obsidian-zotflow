@@ -26,14 +26,6 @@ export interface BatchExtractExternalAnnotationsInput {
 }
 
 /**
- * Result of the extraction, available after the task completes.
- */
-interface ExtractionResult {
-    /** External annotations converted to AnnotationJSON (for reader bridge). */
-    annotations: AnnotationJSON[];
-}
-
-/**
  * BatchExtractExternalAnnotationsTask — extracts external (embedded PDF)
  * annotations via `PDFProcessWorker.import()`.
  *
@@ -43,8 +35,10 @@ interface ExtractionResult {
  *   3. Delete old external annotations from IDB
  *   4. Download the PDF blob
  *   5. Call `pdfProcessWorker.import()` to extract annotations
- *   6. Store extracted annotations in IDB (syncStatus = "ignore")
- *   7. Update the extraction MD5 on the attachment record
+ *   6. Update the extraction MD5 on the attachment record
+ *
+ * Extracted annotations are never written to IDB — they live in the PDF, so
+ * they are held in memory for the reader and re-extracted when the MD5 moves.
  *
  * The resulting `AnnotationJSON[]` are cached and can be retrieved via
  * `getExtractedAnnotations()` after the task completes.
@@ -70,7 +64,7 @@ export class BatchExtractExternalAnnotationsTask extends BaseTask {
         for (const { libraryID, itemKey } of this.input.items) {
             const item = await db.items.get([libraryID, itemKey]);
             if (item && item.itemType === "attachment") {
-                resolvedItems.push(item as IDBZoteroItem<AttachmentData>);
+                resolvedItems.push(item);
             }
         }
 
@@ -244,29 +238,9 @@ export class BatchExtractExternalAnnotationsTask extends BaseTask {
         // Extract via PDF worker
         const rawAnnotations = await this.pdfProcessor.import(buffer, true);
 
-        // Build AnnotationJSON for the reader
+        // Annotations that live in the PDF are never editable here.
         const annotationJsonResults: AnnotationJSON[] = rawAnnotations.map(
-            (raw: any) => {
-                const key =
-                    raw.key || raw.id || crypto.randomUUID().slice(0, 8);
-
-                return {
-                    id: key,
-                    type: raw.annotationType,
-                    isExternal: true,
-                    authorName: raw.annotationAuthorName,
-                    readOnly: true,
-                    text: raw.annotationText,
-                    comment: raw.annotationComment,
-                    pageLabel: raw.annotationPageLabel,
-                    color: raw.annotationColor,
-                    sortIndex: raw.annotationSortIndex,
-                    position: JSON.parse(raw.annotationPosition),
-                    tags: raw.tags || [],
-                    dateModified: raw.dateModified,
-                    dateAdded: raw.dateAdded,
-                };
-            },
+            (raw) => ({ ...raw, readOnly: true }),
         );
 
         // Update extraction MD5 on the attachment

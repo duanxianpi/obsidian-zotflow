@@ -361,6 +361,15 @@ describe("local attachment notes", () => {
         ).toBe("Notes/Q3 results.md");
     });
 
+    test("control characters are removed from a basename", async () => {
+        expect(
+            await h.notePath.resolveLocalNotePath(
+                localFile({ basename: "Some\u0000\u007f Paper" }),
+                "Notes/{{basename}}",
+            ),
+        ).toBe("Notes/Some Paper.md");
+    });
+
     test("previewLocalNotePath is the same resolution with a caller's template", async () => {
         expect(
             await h.notePath.previewLocalNotePath(localFile(), "P/{{basename}}"),

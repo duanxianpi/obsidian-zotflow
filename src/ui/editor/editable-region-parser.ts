@@ -219,7 +219,7 @@ export function parseEditableRegions(doc: Text): EditableRegion[] {
         const metaMatch = META_REGEX_G.exec(text);
         if (metaMatch && metaMatch.index < region.to) {
             region.metaFrom = metaMatch.index;
-            region.metaTo = metaMatch.index + metaMatch[0]!.length;
+            region.metaTo = metaMatch.index + metaMatch[0].length;
 
             // Move editable start past the meta line
             const metaLine = doc.lineAt(region.metaTo);

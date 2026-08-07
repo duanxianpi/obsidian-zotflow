@@ -64,7 +64,7 @@ class UnlockIconWidget extends WidgetType {
     }
 
     toDOM(view: EditorView): HTMLElement {
-        const span = document.createElement("span");
+        const span = createSpan();
         span.className = "cm-zotflow-unlock-icon";
         if (this.unlocked) span.classList.add("cm-zotflow-unlocked");
         if (this.disabled) {
@@ -122,7 +122,7 @@ class RegionBorderPlugin {
     private lastPositionKey = "";
 
     constructor(private view: EditorView) {
-        this.container = document.createElement("div");
+        this.container = createDiv();
         this.container.className = "cm-zotflow-region-borders";
         this.container.setAttribute("aria-hidden", "true");
 
@@ -209,7 +209,7 @@ class RegionBorderPlugin {
         this.overlays = [];
 
         for (const p of positions) {
-            const el = document.createElement("div");
+            const el = createDiv();
             el.className = `cm-zotflow-region-border-overlay cm-zotflow-region-border-overlay-${p.type.toLowerCase()}`;
             el.style.top = `${p.top}px`;
             el.style.left = `${p.left}px`;

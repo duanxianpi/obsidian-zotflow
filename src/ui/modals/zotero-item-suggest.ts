@@ -1,4 +1,3 @@
-import { setIcon } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { parseSearchQuery, splitHighlight } from "utils/search-query";
@@ -89,9 +88,7 @@ export class ZoteroItemSuggest {
                 .filter((item) => this.shouldIncludeItem(item));
 
             if (zItems.length > 0) {
-                const firstHeader = items.find((i) => "isHeader" in i) as
-                    | SearchHeader
-                    | undefined;
+                const firstHeader = items.find((i) => "isHeader" in i);
                 items = [...(firstHeader ? [firstHeader] : []), ...zItems];
             } else {
                 items = [];
@@ -185,7 +182,10 @@ export class ZoteroItemSuggest {
         // Author • Year
         const metaEl = bottomRow.createDiv({ cls: "zotflow-meta" });
         const authors = this.formatCreators(zItem.searchCreators);
-        const year = this.extractYear((zItem.raw.data as any).date);
+        // Only some Zotero item types carry `date`, so it is read off the
+        // union rather than assumed present.
+        const { date } = zItem.raw.data as { date?: string };
+        const year = this.extractYear(date ?? "");
 
         let metaText = "";
         if (authors && year !== "n.d.") metaText = `${authors} (${year}).`;

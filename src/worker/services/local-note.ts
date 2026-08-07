@@ -4,7 +4,12 @@ import type { LocalTemplateService } from "./local-template";
 import type { NotePathService } from "./note-path";
 import type { AnnotationJSON } from "types/zotero-reader";
 import type { TFileWithoutParentAndVault } from "types/zotflow";
-import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import { errorMessage, ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import {
+    workerClearTimeout,
+    workerSetTimeout,
+    type WorkerTimeout,
+} from "worker/timers";
 import {
     extractPersistRegions,
     reinsertPersistRegions,
@@ -19,12 +24,12 @@ const ZOTFLOW_REGEX =
 
 /** CRUD service for local vault file notes (PDF/EPUB opened locally). */
 export class LocalNoteService {
-    private debouncers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+    private debouncers: Map<string, WorkerTimeout> = new Map();
 
     // Notes that gained orphaned persist regions since the last Notice
     // (same aggregation pattern as LibraryNoteService).
     private orphanReports: Map<string, string[]> = new Map();
-    private orphanNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+    private orphanNoticeTimer: WorkerTimeout | null = null;
 
     constructor(
         private settings: ZotFlowSettings,
@@ -50,11 +55,11 @@ export class LocalNoteService {
      */
     public dispose() {
         for (const timer of this.debouncers.values()) {
-            clearTimeout(timer);
+            workerClearTimeout(timer);
         }
         this.debouncers.clear();
         if (this.orphanNoticeTimer !== null) {
-            clearTimeout(this.orphanNoticeTimer);
+            workerClearTimeout(this.orphanNoticeTimer);
             this.orphanNoticeTimer = null;
         }
     }
@@ -72,9 +77,9 @@ export class LocalNoteService {
         this.orphanReports.set(path, orphanIds);
 
         if (this.orphanNoticeTimer !== null) {
-            clearTimeout(this.orphanNoticeTimer);
+            workerClearTimeout(this.orphanNoticeTimer);
         }
-        this.orphanNoticeTimer = setTimeout(() => {
+        this.orphanNoticeTimer = workerSetTimeout(() => {
             this.orphanNoticeTimer = null;
             const noteCount = this.orphanReports.size;
             this.orphanReports.clear();
@@ -158,23 +163,26 @@ export class LocalNoteService {
         // Debounced execution
         const debounceId = localAttachment.path;
         if (this.debouncers.has(debounceId)) {
-            clearTimeout(this.debouncers.get(debounceId)!);
+            workerClearTimeout(this.debouncers.get(debounceId));
             this.debouncers.delete(debounceId);
         }
 
-        const timer = setTimeout(async () => {
+        const run = async () => {
             this.debouncers.delete(debounceId);
             try {
                 await this.ensureNote(localAttachment, annotations);
             } catch (e) {
                 this.parentHost.log(
                     "error",
-                    "Debounced update failed: " + (e as Error).message,
+                    "Debounced update failed: " + errorMessage(e),
                     "LocalNoteService",
                     e,
                 );
             }
-        }, 2000);
+        };
+        // The body handles its own failures, so the promise is deliberately
+        // not awaited by the timer.
+        const timer = workerSetTimeout(() => void run(), 2000);
 
         this.debouncers.set(debounceId, timer);
     }
@@ -225,12 +233,12 @@ export class LocalNoteService {
             if (exists.exists) {
                 await this.parentHost.deleteFile(path);
             }
-        } catch (e: any) {
+        } catch (e) {
             throw ZotFlowError.wrap(
                 e,
                 ZotFlowErrorCode.FILE_WRITE_FAILED,
                 "LocalNoteService",
-                `Failed to delete image ${annotationKey}: ${e.message}`,
+                `Failed to delete image ${annotationKey}: ${errorMessage(e)}`,
             );
         }
     }
@@ -269,7 +277,7 @@ export class LocalNoteService {
                 try {
                     const fullBlock = match[0];
                     const jsonStr = match[1]!;
-                    const ann = JSON.parse(jsonStr);
+                    const ann = JSON.parse(jsonStr) as AnnotationJSON;
 
                     const quoteMatch =
                         /%% OZRP-ANNO-QUOTE-BEGIN %%([\s\S]*?)[>\s]*%% OZRP-ANNO-QUOTE-END %%/.exec(
@@ -317,7 +325,7 @@ export class LocalNoteService {
                 try {
                     const jsonStr = match[2]!;
                     const decodedJsonStr = decodeURIComponent(jsonStr);
-                    const ann = JSON.parse(decodedJsonStr);
+                    const ann = JSON.parse(decodedJsonStr) as AnnotationJSON;
                     annotations.push(ann);
                 } catch (e) {
                     this.parentHost.log(

@@ -359,14 +359,16 @@ describe("renameFile", () => {
 /* ================================================================ */
 
 describe("deleteFile", () => {
-    it("sends a vault file to the system trash", async () => {
+    it("trashes a vault file the way the user configured", async () => {
         app.writeFile("Notes/A.md", "x");
 
         await deleteFile(app.app, "Notes/A.md");
 
-        // `true` = system trash: deletion must stay reversible for the user.
-        expect(app.vaultCalls).toContain("trash:Notes/A.md:true");
-        expect(app.trashed.system).toEqual(["Notes/A.md"]);
+        // Through FileManager, so the vault's deletion preference picks the
+        // destination. Going via `vault.trash` would force the system bin on a
+        // user who asked for `.trash/`.
+        expect(app.vaultCalls).toContain("trashFile:Notes/A.md");
+        expect(app.trashed.preferred).toEqual(["Notes/A.md"]);
         expect(app.has("Notes/A.md")).toBe(false);
     });
 

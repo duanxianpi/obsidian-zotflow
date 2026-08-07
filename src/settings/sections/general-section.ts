@@ -1,4 +1,4 @@
-import { Setting, SettingGroup } from "obsidian";
+import { SettingGroup } from "obsidian";
 import ZotFlow from "main";
 import type { ReaderColorScheme } from "settings/types";
 import { services } from "services/services";

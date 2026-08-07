@@ -59,13 +59,13 @@ export class NotificationService {
             duration = 0;
         }
 
-        const fragment = document.createDocumentFragment();
-        const container = fragment.createEl("div", {
+        const fragment = createFragment();
+        const container = fragment.createDiv({
             cls: "zotflow-notice-container",
         });
 
         if (iconId) {
-            const iconEl = container.createEl("span", {
+            const iconEl = container.createSpan({
                 cls: "zotflow-notice-icon",
             });
             setIcon(iconEl, iconId);
@@ -74,7 +74,7 @@ export class NotificationService {
             }
         }
 
-        const messageEl = container.createEl("span", {
+        const messageEl = container.createSpan({
             text: message,
             cls: "zotflow-notice-message",
         });

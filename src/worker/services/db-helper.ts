@@ -93,7 +93,7 @@ export class DbHelperService {
     ): Promise<IDBZoteroItem<AttachmentData> | undefined> {
         const item = await db.items.get([libraryID, itemKey]);
         if (!item || item.itemType !== "attachment") return undefined;
-        return item as IDBZoteroItem<AttachmentData>;
+        return item;
     }
 
     /**

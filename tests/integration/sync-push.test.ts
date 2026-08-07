@@ -133,6 +133,42 @@ describe("request payload", () => {
         expect(sent!.data.version).toBe(stored.version);
     });
 
+    test("the stored version wins over a stale one in the raw payload", async () => {
+        // The row's `version` column is authoritative — it is what the server
+        // checks for optimistic locking. Copying `raw` alone is not enough,
+        // because the two can disagree; if the stale one were sent, a
+        // concurrent edit on the server would be silently overwritten.
+        h = await createSyncHarness();
+        await seedItem({
+            libraryID: USER_ID,
+            key: "AAAAAAAA",
+            syncStatus: "updated",
+            version: 42,
+            raw: {
+                key: "AAAAAAAA",
+                version: 7,
+                library: { type: "user", id: USER_ID, name: "Library" },
+                data: {
+                    key: "AAAAAAAA",
+                    version: 7,
+                    itemType: "journalArticle",
+                    title: "Item AAAAAAAA",
+                    dateAdded: "2020-01-01T00:00:00Z",
+                    dateModified: "2020-01-01T00:00:00Z",
+                    collections: [],
+                    tags: [],
+                    relations: {},
+                },
+            } as never,
+        });
+
+        await h.sync.startSync();
+
+        const [sent] = postedPayload(h);
+        expect(sent!.version).toBe(42);
+        expect(sent!.data.version).toBe(42);
+    });
+
     test("dateModified is stamped and dateAdded normalized to Zotero's format", async () => {
         h = await createSyncHarness();
         await seedItem({
@@ -203,6 +239,87 @@ describe("write response handling", () => {
         expect(stored.syncStatus).toBe("synced");
         expect(stored.syncError).toBeUndefined();
         expect(stored.version).toBe(h.server.library(USER_ID).version);
+    });
+
+    test("a successful update is marked synced and adopts the server version", async () => {
+        h = await createSyncHarness();
+        const lib = h.server.library(USER_ID);
+        lib.addItem({ key: "AAAAAAAA" });
+        await h.sync.startSync();
+        const before = (await db.items.get([USER_ID, "AAAAAAAA"]))!.version;
+
+        await db.items.update([USER_ID, "AAAAAAAA"], {
+            syncStatus: "updated",
+        });
+        await h.sync.startSync();
+
+        const stored = (await db.items.get([USER_ID, "AAAAAAAA"]))!;
+        expect(stored.syncStatus).toBe("synced");
+        expect(stored.syncError).toBeUndefined();
+        expect(stored.version).toBe(lib.version);
+        expect(stored.version).not.toBe(before);
+    });
+
+    test("a rejected push leaves the stored raw untouched", async () => {
+        // Building the outgoing payload must not edit the item it was built
+        // from. On success the raw is replaced by the server's echo and the
+        // damage is invisible, but a rejected item keeps its local raw — and
+        // that copy has to still be the one that was there before the attempt.
+        h = await createSyncHarness();
+        await seedItem({
+            libraryID: USER_ID,
+            key: "ANNO0001",
+            syncStatus: "updated",
+            itemType: "annotation",
+            raw: {
+                key: "ANNO0001",
+                version: 1,
+                library: { type: "user", id: USER_ID, name: "Library" },
+                data: {
+                    key: "ANNO0001",
+                    version: 1,
+                    itemType: "annotation",
+                    dateAdded: "2020-01-01T00:00:00.000Z",
+                    dateModified: "2020-01-01T00:00:00.000Z",
+                    annotationIsExternal: true,
+                    tags: [],
+                    relations: {},
+                },
+            } as never,
+        });
+        h.server
+            .library(USER_ID)
+            .rejectWrite("ANNO0001", { code: 400, message: "nope" });
+
+        await h.sync.startSync();
+
+        const stored = (await db.items.get([USER_ID, "ANNO0001"]))!;
+        expect(stored.syncStatus).toBe("conflict");
+        const data = stored.raw.data as unknown as Record<string, unknown>;
+        // `annotationIsExternal` is stripped from the payload, never from us.
+        expect(data.annotationIsExternal).toBe(true);
+        expect(data.dateModified).toBe("2020-01-01T00:00:00.000Z");
+    });
+
+    test("the server's echoed payload replaces the stored raw", async () => {
+        // The write response is authoritative: the server may normalise or
+        // add fields, and a local raw left behind would resurface as a phantom
+        // change on the next diff.
+        h = await createSyncHarness();
+        const lib = h.server.library(USER_ID);
+        lib.addItem({ key: "AAAAAAAA" });
+        await h.sync.startSync();
+
+        await db.items.update([USER_ID, "AAAAAAAA"], {
+            syncStatus: "updated",
+        });
+        await h.sync.startSync();
+
+        const stored = (await db.items.get([USER_ID, "AAAAAAAA"]))!;
+        // The server bumps the version on every write; the stored raw has to
+        // carry that, not the version it was pushed with.
+        expect(stored.raw.version).toBe(lib.version);
+        expect(stored.raw.data.version).toBe(lib.version);
     });
 
     test("an item the server reports unchanged keeps its version", async () => {

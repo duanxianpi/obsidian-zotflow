@@ -27,28 +27,33 @@ function getPatchedViewerCSS(
     const relativeUrlPattern =
         /url\(\s*(['"]?)(?![a-z][\w+.-]*:|\/\/)([^'")]+)\1\s*\)/g;
 
-    return text.replace(relativeUrlPattern, (match, quote, url) => {
-        // Extract pure filename (remove path and query parameters)
-        const basename = url.match(/([^\/?#]+)(?:\?.*)?$/)?.[1];
+    // `String.replace` types every capture after the match as `any`; both of
+    // these are groups in `relativeUrlPattern`, so they are always strings.
+    return text.replace(
+        relativeUrlPattern,
+        (match: string, _quote: string, url: string) => {
+            // Extract pure filename (remove path and query parameters)
+            const basename = url.match(/([^/?#]+)(?:\?.*)?$/)?.[1];
 
-        if (!basename) return match;
+            if (!basename) return match;
 
-        // Find matching resource
-        const hitKey = Object.keys(BLOB_BINARY_MAP).find((k) =>
-            k.endsWith(basename),
-        );
+            // Find matching resource
+            const hitKey = Object.keys(BLOB_BINARY_MAP).find((k) =>
+                k.endsWith(basename),
+            );
 
-        if (hitKey) {
-            const resource = BLOB_BINARY_MAP[hitKey]!;
-            const base64 = uint8ArrayToBase64(resource.data);
-            const mimeType = resource.type || "application/octet-stream";
+            if (hitKey) {
+                const resource = BLOB_BINARY_MAP[hitKey]!;
+                const base64 = uint8ArrayToBase64(resource.data);
+                const mimeType = resource.type || "application/octet-stream";
 
-            return `url("data:${mimeType};base64,${base64}")`;
-        } else {
-            console.warn(`[Zotero Reader] CSS Resource not found: ${url}`);
-            return match;
-        }
-    });
+                return `url("data:${mimeType};base64,${base64}")`;
+            } else {
+                console.warn(`[Zotero Reader] CSS Resource not found: ${url}`);
+                return match;
+            }
+        },
+    );
 }
 
 /** -----------------------------------------------------------
@@ -95,7 +100,7 @@ export function patchPDFJSViewerHTML(
     moduleScripts.forEach((scriptEl) => {
         const src = scriptEl.getAttribute("src") || "";
         // Find a key whose basename matches (similar to your RegExp logic)
-        const basenameMatch = src.match(/([^\/?#]+)(?:\?.*)?$/);
+        const basenameMatch = src.match(/([^/?#]+)(?:\?.*)?$/);
         const basename = basenameMatch?.[1];
         if (basename) {
             const hit = Object.keys(BLOB_URL_MAP).find((k) =>

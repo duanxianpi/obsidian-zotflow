@@ -181,7 +181,7 @@ export const TemplateTestView: React.FC = () => {
                 comp,
             );
         } else {
-            container.createEl("span", {
+            container.createSpan({
                 text: "Click Render to see output.",
                 cls: "zotflow-template-test-placeholder",
             });
@@ -552,7 +552,7 @@ export const TemplateTestView: React.FC = () => {
             <div className="zotflow-template-test-actions">
                 <button
                     className="mod-cta"
-                    onClick={handleRender}
+                    onClick={() => void handleRender()}
                     disabled={rendering}
                 >
                     {rendering ? "Rendering..." : "Render"}

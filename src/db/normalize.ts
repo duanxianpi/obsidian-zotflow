@@ -1,4 +1,3 @@
-import type { ZoteroItemData } from "types/zotero-item";
 import type { IDBZoteroCollection, AnyIDBZoteroItem } from "types/db-schema";
 import type { ZoteroCollection, AnyZoteroItem } from "types/zotero";
 
@@ -26,6 +25,17 @@ export function normalizeCollection(
         raw: raw,
     };
     return collection;
+}
+
+/**
+ * The creator fields normalization reads. Every item type declares its own
+ * `creators` with a `creatorType` union specific to it; only these three are
+ * common to all of them, and only these are used for the search index.
+ */
+interface ZoteroCreator {
+    firstName?: string;
+    lastName?: string;
+    name?: string;
 }
 
 function extractCitationKey(extra?: string) {
@@ -127,10 +137,6 @@ export function normalizeItem(
 ): AnyIDBZoteroItem {
     // Safety check for title
     let title = "";
-    let citationKey;
-
-    // We can access common properties
-    const commonData = raw.data as ZoteroItemData;
 
     // Normalize title
     if (raw.data.itemType === "attachment") {
@@ -140,13 +146,13 @@ export function normalizeItem(
     } else if (raw.data.itemType !== "annotation") {
         // Exclude annotation which doesn't have title
         // For other types that might have title
-        const maybeTitle = (raw.data as any).title;
+        const maybeTitle = raw.data.title;
         if (maybeTitle) title = maybeTitle;
     }
 
     // Flatten creators for search
     const searchCreators: string[] = [];
-    let creators: any[] = [];
+    let creators: ZoteroCreator[] = [];
 
     if (
         raw.data.itemType === "attachment" ||
@@ -158,7 +164,7 @@ export function normalizeItem(
         creators = raw.data.creators || [];
     }
 
-    creators.forEach((c: any) => {
+    creators.forEach((c) => {
         if (c.name) {
             searchCreators.push(c.name);
         } else if (c.firstName || c.lastName) {
@@ -170,8 +176,8 @@ export function normalizeItem(
 
     // Flatten tags for search
     const searchTags: string[] = [];
-    if (commonData.tags && Array.isArray(commonData.tags)) {
-        commonData.tags.forEach((t: any) => {
+    if (raw.data.tags && Array.isArray(raw.data.tags)) {
+        raw.data.tags.forEach((t) => {
             if (t.tag) searchTags.push(t.tag);
         });
     }
@@ -181,8 +187,10 @@ export function normalizeItem(
         libraryID: libraryID,
         itemType: raw.data.itemType,
         citationKey:
-            (raw.data as any).citationKey ||
-            extractCitationKey((raw.data as any).extra),
+            ("citationKey" in raw.data ? raw.data.citationKey : undefined) ||
+            extractCitationKey(
+                "extra" in raw.data ? raw.data.extra : undefined,
+            ),
         parentItem: raw.data.parentItem || "",
         collections: raw.data.collections ?? [],
         title: title,

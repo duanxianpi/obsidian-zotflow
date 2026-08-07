@@ -93,7 +93,7 @@ export class CitationService {
             }
         } catch (error) {
             services.logService.error(
-                `Error generating citation for item ${item.libraryID}/${item.key}: ${error}`,
+                `Error generating citation for item ${item.libraryID}/${item.key}: ${String(error)}`,
                 "CitationService",
                 error,
             );

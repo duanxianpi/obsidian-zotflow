@@ -10,6 +10,9 @@ import {
 import type { ViewStateResult } from "obsidian";
 import type { NoteData } from "types/zotero-item";
 import type { IDBZoteroItem } from "types/db-schema";
+import { fireAndForgetIn } from "utils/fire-and-forget";
+
+const ff = fireAndForgetIn("NoteEditorView");
 
 export const NOTE_EDITOR_VIEW_TYPE = "zotflow-note-editor-view";
 
@@ -26,7 +29,8 @@ export class NoteEditorView extends ItemView {
     private editor?: EmbeddableMarkdownEditor;
     /** Stripped `<!-- ZF_NOTE_META ... -->` line to re-inject on save. */
     private metaLine = "";
-    private saveTimer?: ReturnType<typeof setTimeout>;
+    /** `window.setTimeout` handle — a number, unlike Node's `Timeout`. */
+    private saveTimer?: number;
     private unsubscribeTaskMonitor?: () => void;
     private unsubscribeNoteChanged?: () => void;
     private lastSyncStatuses = new Map<string, string>();
@@ -71,7 +75,7 @@ export class NoteEditorView extends ItemView {
             return;
         }
 
-        this.noteItem = item as IDBZoteroItem<NoteData>;
+        this.noteItem = item;
 
         // Update tab title
         this.updateTitle();
@@ -79,7 +83,7 @@ export class NoteEditorView extends ItemView {
         await this.renderContent();
         this.subscribeToSyncEvents();
         this.subscribeToNoteChanges();
-        super.setState(state, result);
+        return super.setState(state, result);
     }
 
     getState(): NoteEditorState {
@@ -154,11 +158,11 @@ export class NoteEditorView extends ItemView {
      */
     private scheduleSave() {
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
         }
-        this.saveTimer = setTimeout(() => {
+        this.saveTimer = window.setTimeout(() => {
             this.saveTimer = undefined;
-            this.saveContent();
+            ff(this.saveContent(), "Failed to save the note");
         }, SAVE_DEBOUNCE_MS);
     }
 
@@ -180,7 +184,7 @@ export class NoteEditorView extends ItemView {
                 this.noteItem.key,
             );
             if (updated && updated.itemType === "note") {
-                this.noteItem = updated as IDBZoteroItem<NoteData>;
+                this.noteItem = updated;
                 this.updateTitle();
             }
 
@@ -228,7 +232,10 @@ export class NoteEditorView extends ItemView {
                         continue;
                     }
 
-                    this.refreshAfterSync();
+                    ff(
+                        this.refreshAfterSync(),
+                        "Failed to refresh after sync",
+                    );
                 }
             },
         );
@@ -246,7 +253,10 @@ export class NoteEditorView extends ItemView {
             services.taskMonitor.noteChangedByEditor.subscribe(
                 (_libraryID, noteKey, _parentItemKey) => {
                     if (noteKey !== this.noteItem?.key) return;
-                    this.refreshAfterSync();
+                    ff(
+                        this.refreshAfterSync(),
+                        "Failed to refresh after sync",
+                    );
                 },
             );
     }
@@ -256,7 +266,7 @@ export class NoteEditorView extends ItemView {
 
         // Flush pending saves before overwriting with synced content
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
             this.saveTimer = undefined;
             await this.saveContent();
         }
@@ -268,7 +278,7 @@ export class NoteEditorView extends ItemView {
 
         if (!item || item.itemType !== "note") return;
 
-        this.noteItem = item as IDBZoteroItem<NoteData>;
+        this.noteItem = item;
         this.updateTitle();
 
         await this.renderContent();
@@ -285,7 +295,7 @@ export class NoteEditorView extends ItemView {
 
     private destroyEditor() {
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
             this.saveTimer = undefined;
         }
         if (this.editor) {
@@ -301,7 +311,7 @@ export class NoteEditorView extends ItemView {
         this.unsubscribeNoteChanged = undefined;
         // Flush any pending save before closing
         if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
+            window.clearTimeout(this.saveTimer);
             this.saveTimer = undefined;
             await this.saveContent();
         }

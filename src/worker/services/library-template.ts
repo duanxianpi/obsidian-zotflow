@@ -9,11 +9,7 @@ import type {
     RelatedItemTemplateContext,
 } from "types/template-context";
 import type { IParentProxy } from "bridge/types";
-import type {
-    AnnotationData,
-    AttachmentData,
-    NoteData,
-} from "types/zotero-item";
+import type { AttachmentData, NoteData } from "types/zotero-item";
 import type { ZotFlowSettings } from "settings/types";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 import {
@@ -39,6 +35,11 @@ import type {
     RenderOptions,
 } from "worker/csl";
 import { extractYear } from "utils/date";
+import {
+    renderLiquid,
+    zfEnv,
+    type LiquidFilterScope,
+} from "./liquid-support";
 
 const DEFAULT_ITEM_TEMPLATE = `---
 citationKey: {{ item.citationKey | json }}
@@ -50,7 +51,7 @@ date: {{ item.date | json }}
 year: {{ item.year }}
 url: {{ item.url | json }}
 doi: {{ item.DOI | json }}
-tags: [{% for t in item.tags %}"#{{ t.tag | replace: " ", "\_" }}"{% unless forloop.last %}, {% endunless %}{% endfor %}]
+tags: [{% for t in item.tags %}"#{{ t.tag | replace: " ", "_" }}"{% unless forloop.last %}, {% endunless %}{% endfor %}]
 ---
 {%- capture quote_string %}{{ newline }}> {% endcapture -%}
 {%- capture quote_string_2 %}{{ newline }}> >{% endcapture -%}
@@ -88,7 +89,7 @@ tags: [{% for t in item.tags %}"#{{ t.tag | replace: " ", "\_" }}"{% unless forl
 {%- endif -%}
 >
 > {{ annotation.comment | wrap_editable: "ANNO", annotation.key | replace: newline, quote_string }}
-> {% if annotation.tags and annotation.tags.length > 0 -%} {% for t in annotation.tags %}#{{ t.tag | replace: " ", "\_" }}{% unless forloop.last %} {% endunless %}{% endfor %} {%- endif %}
+> {% if annotation.tags and annotation.tags.length > 0 -%} {% for t in annotation.tags %}#{{ t.tag | replace: " ", "_" }}{% unless forloop.last %} {% endunless %}{% endfor %} {%- endif %}
 ^{{ annotation.key }}
 
 {%- endfor -%}
@@ -106,7 +107,7 @@ tags: [{% for t in item.tags %}"#{{ t.tag | replace: " ", "\_" }}"{% unless forl
 {%- endif -%}
 >
 > {{ annotation.comment | wrap_editable: "ANNO", annotation.key | replace: newline, quote_string }}
-> {% if annotation.tags and annotation.tags.length > 0 -%} {% for t in annotation.tags %}#{{ t.tag | replace: " ", "\_" }}{% unless forloop.last %} {% endunless %}{% endfor %} {%- endif %}
+> {% if annotation.tags and annotation.tags.length > 0 -%} {% for t in annotation.tags %}#{{ t.tag | replace: " ", "_" }}{% unless forloop.last %} {% endunless %}{% endfor %} {%- endif %}
 ^{{ annotation.key }}
 
 {%- endfor -%}
@@ -140,6 +141,58 @@ const CSL_OUTPUT_FORMATS = new Set([
     "markdown-pure",
 ]);
 
+/**
+ * An unchecked read-view over `ZoteroItemData`, not a shape any item actually
+ * has. Each field is declared on only some members of the union — a book has
+ * no `publicationTitle`, an attachment has none of them — so every one is
+ * optional here and may genuinely be absent at runtime.
+ */
+interface OptionalItemFields {
+    date?: string;
+    accessDate?: string;
+    abstractNote?: string;
+    publicationTitle?: string;
+    publisher?: string;
+    place?: string;
+    volume?: string;
+    issue?: string;
+    pages?: string;
+    series?: string;
+    seriesNumber?: string;
+    edition?: string;
+    url?: string;
+    DOI?: string;
+    ISBN?: string;
+    ISSN?: string;
+    creators?: Array<{
+        name?: string;
+        firstName?: string;
+        lastName?: string;
+    }>;
+}
+
+/** Root scope handed to Liquid when rendering a source note. */
+interface ItemRenderContext {
+    item: ItemTemplateContext;
+    settings: ZotFlowSettings;
+    __zfReadOnlyKeys: Set<string>;
+    __zfZoteroLibPrefix: string;
+}
+
+/** Root scope handed to Liquid when rendering a citation. */
+interface CitationRenderContext {
+    item: ItemTemplateContext;
+    notePath: string;
+    annotations?: AnnotationTemplateContext[];
+}
+
+/** Identity fields the link filters need; every template context supplies them. */
+interface LinkableItem {
+    key: string;
+    libraryID: number;
+    parentItem?: string;
+}
+
 /** LiquidJS template engine for rendering library (Zotero) item source notes. */
 export class LibraryTemplateService {
     private engine: Liquid;
@@ -154,6 +207,11 @@ export class LibraryTemplateService {
         private zotero: ZoteroAPIService,
     ) {
         this.initialize();
+    }
+
+    /** `Liquid.parseAndRender` is typed `any`; every template here is text. */
+    private async render(template: string, scope: object): Promise<string> {
+        return renderLiquid(this.engine, template, scope);
     }
 
     initialize() {
@@ -175,11 +233,15 @@ export class LibraryTemplateService {
         // per call via a filter argument.
         const resolveTarget = (arg: unknown): "zotflow" | "zotero" =>
             String(arg).toLowerCase() === "zotero" ? "zotero" : "zotflow";
-        const getZoteroPrefix = (ctx: any): string =>
-            ctx?.context?.environments?.__zfZoteroLibPrefix || "library";
+        const getZoteroPrefix = (scope: LiquidFilterScope): string =>
+            zfEnv(scope).__zfZoteroLibPrefix || "library";
         this.engine.registerFilter(
             "annotation_link",
-            function (this: any, anno: any, target?: string): string {
+            function (
+                this: LiquidFilterScope,
+                anno: LinkableItem | null | undefined,
+                target?: string,
+            ): string {
                 if (!anno) return "";
                 if (resolveTarget(target) === "zotero") {
                     const prefix = getZoteroPrefix(this);
@@ -194,7 +256,11 @@ export class LibraryTemplateService {
         );
         this.engine.registerFilter(
             "attachment_link",
-            function (this: any, att: any, target?: string): string {
+            function (
+                this: LiquidFilterScope,
+                att: LinkableItem | null | undefined,
+                target?: string,
+            ): string {
                 if (!att) return "";
                 if (resolveTarget(target) === "zotero") {
                     const prefix = getZoteroPrefix(this);
@@ -205,7 +271,11 @@ export class LibraryTemplateService {
         );
         this.engine.registerFilter(
             "item_link",
-            function (this: any, item: any, target?: string): string {
+            function (
+                this: LiquidFilterScope,
+                item: LinkableItem | null | undefined,
+                target?: string,
+            ): string {
                 if (!item) return "";
                 if (resolveTarget(target) === "zotero") {
                     const prefix = getZoteroPrefix(this);
@@ -232,10 +302,14 @@ export class LibraryTemplateService {
              * citation render paths that don't prep one), preserving the old
              * behaviour for callers that don't opt in.
              */
-            function (this: any, input: string, type: string, key: string) {
+            function (
+                this: LiquidFilterScope,
+                input: string,
+                type: string,
+                key: string,
+            ) {
                 if (!type || !key) return input;
-                const readOnlyKeys: Set<string> | undefined =
-                    this?.context?.environments?.__zfReadOnlyKeys;
+                const readOnlyKeys = zfEnv(this).__zfReadOnlyKeys;
                 if (readOnlyKeys && readOnlyKeys.has(`${type}:${key}`)) {
                     return input;
                 }
@@ -530,7 +604,7 @@ export class LibraryTemplateService {
     async renderLibrarySourceNote(
         item: AnyIDBZoteroItem,
         templateContent: string | null,
-        originalFrontmatter: Record<string, any> = {},
+        originalFrontmatter: Record<string, unknown> = {},
     ): Promise<string> {
         try {
             const context = await this.prepareItemContext(item);
@@ -551,12 +625,12 @@ export class LibraryTemplateService {
             }
 
             // Parse Template Frontmatter
-            let templateFrontmatter: any = {};
+            let templateFrontmatter: Record<string, unknown> = {};
             if (templateFrontmatterRaw.trim()) {
                 try {
                     // Render the frontmatter raw string first (as it may contain liquid tags)
                     const renderedFrontmatterRaw =
-                        await this.engine.parseAndRender(
+                        await this.render(
                             templateFrontmatterRaw,
                             context,
                         );
@@ -565,7 +639,7 @@ export class LibraryTemplateService {
                     templateFrontmatter = await this.parentHost.parseYaml(
                         renderedFrontmatterRaw,
                     );
-                } catch (e) {
+                } catch {
                     // We don't throw here, just proceed with empty frontmatter from template
                     this.parentHost.log(
                         "error",
@@ -581,7 +655,7 @@ export class LibraryTemplateService {
             //   bare `key`          => overwrite (default; refreshed each
             //                          update from the rendered template)
             // The `??` prefix is stripped from the final key.
-            const finalFrontmatter: Record<string, any> = {
+            const finalFrontmatter: Record<string, unknown> = {
                 ...originalFrontmatter,
             };
             for (const [rawKey, value] of Object.entries(
@@ -610,10 +684,7 @@ export class LibraryTemplateService {
                 await this.parentHost.stringifyYaml(finalFrontmatter);
 
             // Render Body
-            const renderedBody = await this.engine.parseAndRender(
-                body,
-                context,
-            );
+            const renderedBody = await this.render(body, context);
 
             return `---\n${frontmatterString}---\n${renderedBody}`;
         } catch (e) {
@@ -697,16 +768,17 @@ export class LibraryTemplateService {
             );
         }
 
-        const context = {} as any;
-        context.item = await this.mapToItemContext(item);
-        context.notePath = notePath;
+        const context: CitationRenderContext = {
+            item: await this.mapToItemContext(item),
+            notePath,
+        };
         if (input.annotations?.length) {
             context.annotations = input.annotations.map((a) =>
                 this.mapToAnnotationContext(a),
             );
         }
 
-        return this.engine.parseAndRender(template, context);
+        return this.render(template, context);
     }
 
     /** Preview a citation template for a library item (no file creation). */
@@ -725,15 +797,16 @@ export class LibraryTemplateService {
         const notePath =
             (await this.parentHost.getFileByKey(item.key)) ??
             (await this.notePathService.resolveLibraryNotePath(item));
-        const context = {} as any;
-        context.item = await this.mapToItemContext(item);
-        context.notePath = notePath;
+        const context: CitationRenderContext = {
+            item: await this.mapToItemContext(item),
+            notePath,
+        };
         if (input.annotations?.length) {
             context.annotations = input.annotations.map((a) =>
                 this.mapToAnnotationContext(a),
             );
         }
-        return this.engine.parseAndRender(template, context);
+        return this.render(template, context);
     }
 
     /** Return the current citation template from settings. */
@@ -760,7 +833,9 @@ export class LibraryTemplateService {
             : this.settings.citationFootnoteTemplate.trim();
     }
 
-    private async prepareItemContext(item: AnyIDBZoteroItem): Promise<any> {
+    private async prepareItemContext(
+        item: AnyIDBZoteroItem,
+    ): Promise<ItemRenderContext> {
         const itemContext = await this.mapToItemContext(item);
 
         // Build a Set of `${type}:${key}` for regions that must NOT be wrapped
@@ -832,7 +907,7 @@ export class LibraryTemplateService {
 
         const annotations = (
             await getAnnotationJson(
-                item as any,
+                item,
                 this.settings.zoteroapikey,
                 (item) => item.syncStatus !== "deleted",
             )
@@ -842,13 +917,15 @@ export class LibraryTemplateService {
             (att) => att.annotations,
         );
 
+        const optionalFields = data as OptionalItemFields;
+
         let creatorsObj: { name: string }[] = [];
         if (raw.meta?.creatorsSummary) {
             if (typeof raw.meta.creatorsSummary === "string") {
                 creatorsObj = [{ name: raw.meta.creatorsSummary }];
             }
-        } else if ((data as any).creators) {
-            creatorsObj = (data as any).creators.map((c: any) => ({
+        } else if (optionalFields.creators) {
+            creatorsObj = optionalFields.creators.map((c) => ({
                 name:
                     c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim(),
             }));
@@ -881,26 +958,26 @@ export class LibraryTemplateService {
             itemType: item.itemType,
             title: item.title || "",
             creators: creatorsObj,
-            date: (data as any).date || null,
-            year: extractYear((data as any).date),
+            date: optionalFields.date || null,
+            year: extractYear(optionalFields.date),
             dateAdded: item.dateAdded,
             dateModified: item.dateModified,
-            accessDate: (data as any).accessDate || null,
-            abstractNote: (data as any).abstractNote,
-            publicationTitle: (data as any).publicationTitle,
-            publisher: (data as any).publisher,
-            place: (data as any).place,
-            volume: (data as any).volume,
-            issue: (data as any).issue,
-            pages: (data as any).pages,
-            series: (data as any).series,
-            seriesNumber: (data as any).seriesNumber,
-            edition: (data as any).edition,
-            url: (data as any).url,
-            DOI: (data as any).DOI,
-            ISBN: (data as any).ISBN,
-            ISSN: (data as any).ISSN,
-            tags: (data as any).tags || [],
+            accessDate: optionalFields.accessDate || null,
+            abstractNote: optionalFields.abstractNote,
+            publicationTitle: optionalFields.publicationTitle,
+            publisher: optionalFields.publisher,
+            place: optionalFields.place,
+            volume: optionalFields.volume,
+            issue: optionalFields.issue,
+            pages: optionalFields.pages,
+            series: optionalFields.series,
+            seriesNumber: optionalFields.seriesNumber,
+            edition: optionalFields.edition,
+            url: optionalFields.url,
+            DOI: optionalFields.DOI,
+            ISBN: optionalFields.ISBN,
+            ISSN: optionalFields.ISSN,
+            tags: data.tags || [],
             csljson: item.csljson,
         };
     }
@@ -926,7 +1003,7 @@ export class LibraryTemplateService {
         parentItem?: string,
     ): AnnotationTemplateContext {
         return {
-            key: annotation.id!,
+            key: annotation.id,
             libraryID: annotation.libraryID!,
             // Citation-template inputs carry the attachment key on the
             // AnnotationJSON itself (restored by the payload builders).
@@ -956,11 +1033,9 @@ export class LibraryTemplateService {
     }
 
     private async mapToRelatedItems(
-        data: any,
+        data: { relations?: { [k: string]: string | string[] } },
     ): Promise<RelatedItemTemplateContext[]> {
-        const rels = data?.relations as
-            | { [k: string]: string | string[] }
-            | undefined;
+        const rels = data?.relations;
         if (!rels) return [];
 
         const dc = rels["dc:relation"];

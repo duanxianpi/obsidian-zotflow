@@ -398,19 +398,17 @@ npm run build:plugin   # Production build: tsc check + esbuild (plugin only)
 npm run build:reader   # Production build: webpack prod mode (reader only)
 npm run build        # Production build: reader + plugin
 npm run build:ci     # Full CI: build pdf.js + reader + plugin
-npm run test         # lint:clean + typecheck:tests + the whole vitest suite
+npm run test         # lint + typecheck:tests + the whole vitest suite
 npm run test:vitest  # vitest, one shot
 npm run test:watch   # vitest, watch mode
 npm run typecheck:tests   # tsc over tests/ (uses tests/tsconfig.json)
 npm run test:coverage     # vitest + v8 coverage (text + html)
 npm run lint         # eslint over the whole repo (still has a backlog)
-npm run lint:clean   # eslint --max-warnings 0 over the paths in eslint-clean.txt
 ```
 
-`eslint .` is not a gate yet: the repo carries a lint backlog that is being
-worked down file by file. `eslint-clean.txt` is the ratchet — it lists the paths
-that are already clean, `npm run lint:clean` holds them at zero warnings, and it
-runs as part of `npm test`. When you finish cleaning up a file, add it there.
+`eslint .` runs as part of `npm test`. Keep the whole repository free of lint
+errors; remaining warnings should only represent explicit compatibility or UX
+decisions.
 
 ### Tests
 

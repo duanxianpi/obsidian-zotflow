@@ -17,7 +17,7 @@ export class CacheSection {
         const settingGroup = new SettingGroup(containerEl);
         settingGroup.setHeading("Attachment Cache");
 
-        settingGroup.addSetting(async (setting) => {
+        settingGroup.addSetting((setting) => {
             setting.setName("Enable Caching");
             setting.setDesc(
                 "Save attachments locally to improve speed and work offline.",
@@ -35,7 +35,13 @@ export class CacheSection {
 
         if (!this.plugin.settings.useCache) return;
 
-        // Max Size Setting
+        // Max Size Setting.
+        //
+        // This callback must stay async. It keeps building the setting after
+        // awaiting the cache size, and Obsidian types `addSetting` as taking a
+        // `void` callback — matching that type by dropping `async` hard-freezes
+        // the app. The declaration is wrong about its own runtime here.
+        // eslint-disable-next-line @typescript-eslint/no-misused-promises -- see above
         settingGroup.addSetting(async (setting) => {
             setting.setName("Max Cache Limit (MB)");
             setting.setDesc("Set to 0 for unlimited.");
@@ -140,10 +146,10 @@ export class CacheSection {
                         } catch (error) {
                             services.notificationService.notify(
                                 "error",
-                                "Failed to purge cache: " + error,
+                                "Failed to purge cache: " + String(error),
                             );
                             services.logService.error(
-                                "Failed to purge cache: " + error,
+                                "Failed to purge cache: " + String(error),
                                 "Settings",
                             );
                         }

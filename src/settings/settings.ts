@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, setIcon, SettingGroup } from "obsidian";
+import { App, PluginSettingTab, setIcon } from "obsidian";
 import { SyncSection } from "./sections/sync-section";
 import { WebDavSection } from "./sections/webdav-section";
 import { CacheSection } from "./sections/cache-section";
@@ -20,7 +20,16 @@ export class ZotFlowSettingTab extends PluginSettingTab {
         this.icon = "zotero-icon";
     }
 
-    async display(): Promise<void> {
+    /**
+     * Obsidian declares `display(): void` and never awaits it, so the async
+     * work is kicked off explicitly rather than by returning a promise the
+     * framework will drop.
+     */
+    display(): void {
+        void this.render();
+    }
+
+    private async render(): Promise<void> {
         await this.plugin.loadSettings();
 
         const { containerEl } = this;
@@ -31,7 +40,7 @@ export class ZotFlowSettingTab extends PluginSettingTab {
             cls: "zotflow-settings-container",
         });
 
-        const title = settingsContainer.createDiv({
+        settingsContainer.createDiv({
             text: "ZotFlow Settings",
             cls: "zotflow-settings-title",
         });
@@ -48,46 +57,60 @@ export class ZotFlowSettingTab extends PluginSettingTab {
 
         switch (this.activeTab) {
             case "sync":
-                const syncSection = new SyncSection(this.plugin, refreshUI);
+            {
+                    const syncSection = new SyncSection(this.plugin, refreshUI);
                 await syncSection.render(contentContainer);
                 break;
+            }
             case "webdav":
-                const webDavSection = new WebDavSection(this.plugin, refreshUI);
+            {
+                    const webDavSection = new WebDavSection(this.plugin, refreshUI);
                 webDavSection.render(contentContainer);
                 break;
+            }
             case "cache":
-                const cacheSection = new CacheSection(this.plugin, refreshUI);
+            {
+                    const cacheSection = new CacheSection(this.plugin, refreshUI);
                 await cacheSection.render(contentContainer);
                 break;
+            }
             case "general":
-                const generalSection = new GeneralSection(
+            {
+                    const generalSection = new GeneralSection(
                     this.plugin,
                     refreshUI,
                 );
                 generalSection.render(contentContainer);
                 break;
+            }
             case "citation":
-                const citationSection = new CitationSection(
+            {
+                    const citationSection = new CitationSection(
                     this.plugin,
                     refreshUI,
                 );
                 citationSection.render(contentContainer);
                 break;
+            }
             case "csl":
-                const cslSection = new CslSection(this.plugin, refreshUI);
+            {
+                    const cslSection = new CslSection(this.plugin, refreshUI);
                 await cslSection.render(contentContainer);
                 break;
+            }
         }
     }
 
     private renderNav(containerEl: HTMLElement) {
-        const navContainer = containerEl.createDiv();
+        const navContainer = containerEl.createDiv({
+            cls: "zotflow-settings-nav",
+        });
         navContainer.setCssStyles({
             display: "flex",
             marginTop: "0.5rem",
             borderBottom: "1px solid var(--background-modifier-border)",
             overflowX: "auto",
-            overflowY: "auto",
+            overflowY: "hidden",
         });
 
         const tabs: { id: TabSection; label: string; icon: string }[] = [

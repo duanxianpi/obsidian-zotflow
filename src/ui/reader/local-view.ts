@@ -1,4 +1,4 @@
-import { FileView, WorkspaceLeaf, TFile, ItemView } from "obsidian";
+import { WorkspaceLeaf, TFile, ItemView } from "obsidian";
 import { workerBridge } from "bridge";
 import { IframeReaderBridge } from "./bridge";
 import { LocalDataManager } from "./local-data-manager";
@@ -12,14 +12,25 @@ import type {
     ColorScheme,
     AnnotationJSON,
     CustomReaderTheme,
+    ReaderNavigation,
 } from "types/zotero-reader";
+import type { ViewStateResult } from "obsidian";
 import type { TagInput } from "worker/services/tag";
 import { services } from "services/services";
+import { errorMessage as describeError } from "utils/error";
+import { fireAndForgetIn } from "utils/fire-and-forget";
 
 /** View type identifier for the local vault file reader view. */
 export const LOCAL_ZOTERO_READER_VIEW_TYPE = "zotflow-local-zotero-reader-view";
 
+/** Persisted view state: the vault path of the file being read. */
+interface LocalReaderViewState extends Record<string, unknown> {
+    file?: string;
+}
+
 /** Obsidian `ItemView` that embeds the Zotero reader iframe for local PDF/EPUB/HTML vault files. */
+const ff = fireAndForgetIn("LocalReaderView");
+
 export class LocalReaderView extends ItemView {
     private file: TFile | null = null;
     private bridge?: IframeReaderBridge;
@@ -95,7 +106,7 @@ export class LocalReaderView extends ItemView {
 
     async onOpen() {}
 
-    async setState(state: any, result: any) {
+    async setState(state: LocalReaderViewState, result: ViewStateResult) {
         if (state.file) {
             const file = services.app.vault.getAbstractFileByPath(state.file);
             if (file instanceof TFile) {
@@ -104,13 +115,13 @@ export class LocalReaderView extends ItemView {
                     .getElementsByClassName("view-header-title")[0]
                     ?.setText(this.file.name);
 
-                this.loadDocument(this.file);
+                ff(this.loadDocument(this.file), "Failed to load document");
             }
         }
-        super.setState(state, result);
+        return super.setState(state, result);
     }
 
-    getState(): any {
+    getState(): LocalReaderViewState {
         return {
             file: this.file?.path,
         };
@@ -124,7 +135,7 @@ export class LocalReaderView extends ItemView {
         loadingEl.setText(`Loading ${file.name}...`);
 
         try {
-            this.renderReader(file);
+            ff(this.renderReader(file), "Failed to render the reader");
         } catch (e) {
             services.logService.error(
                 "Error loading document",
@@ -194,12 +205,18 @@ export class LocalReaderView extends ItemView {
                     this.handleOpenLink(evt.url);
                 });
 
-                this.bridge.onEventType("annotationsSaved", async (evt) => {
-                    await this.handleAnnotationsSaved(evt.annotations);
+                this.bridge.onEventType("annotationsSaved", (evt) => {
+                    ff(
+                        this.handleAnnotationsSaved(evt.annotations),
+                        "Failed to apply saved annotations",
+                    );
                 });
 
-                this.bridge.onEventType("annotationsDeleted", async (evt) => {
-                    await this.handleAnnotationsDeleted(evt.ids);
+                this.bridge.onEventType("annotationsDeleted", (evt) => {
+                    ff(
+                        this.handleAnnotationsDeleted(evt.ids),
+                        "Failed to apply deleted annotations",
+                    );
                 });
 
                 this.bridge.onEventType("openTagsPopup", (evt) => {
@@ -240,7 +257,10 @@ export class LocalReaderView extends ItemView {
                                 newColorScheme &&
                                 newColorScheme !== this.colorScheme
                             ) {
-                                this.bridge!.setColorScheme(newColorScheme);
+                                ff(
+                                    this.bridge!.setColorScheme(newColorScheme),
+                                    "Failed to set the reader colour scheme",
+                                );
                                 this.colorScheme = newColorScheme;
                             }
                         }
@@ -249,7 +269,7 @@ export class LocalReaderView extends ItemView {
             }
 
             // Connect Bridge & Get File concurrently
-            const [_, buffer, loadedAnnotations] = await Promise.all([
+            const [, buffer, loadedAnnotations] = await Promise.all([
                 this.bridge.connect(),
                 this.app.vault.readBinary(file),
                 (async () => {
@@ -299,17 +319,20 @@ export class LocalReaderView extends ItemView {
                 const type = this.getReaderType(file.extension);
 
                 // Initialize Reader Logic
-                this.bridge.initReader({
-                    data: {
-                        buf: new Uint8Array(buffer),
-                        url: null,
-                    },
-                    type: type as any,
-                    authorName: "",
-                    ...opts,
-                });
+                ff(
+                    this.bridge.initReader({
+                        data: {
+                            buf: new Uint8Array(buffer),
+                            url: null,
+                        },
+                        type: type,
+                        authorName: "",
+                        ...opts,
+                    }),
+                    "Failed to initialise the reader",
+                );
             }
-        } catch (e: any) {
+        } catch (e) {
             services.logService.error(
                 "Error loading Zotero Reader view",
                 "LocalReaderView",
@@ -319,10 +342,10 @@ export class LocalReaderView extends ItemView {
             const errorMessage = container.createDiv({
                 cls: "error-message",
             });
+            errorMessage.createDiv().setText("Failed to load Zotero Reader");
             errorMessage
-                .createEl("div")
-                .setText("Failed to load Zotero Reader");
-            errorMessage.createEl("div").setText("Error details: " + e.message);
+                .createDiv()
+                .setText("Error details: " + describeError(e));
         }
     }
 
@@ -339,9 +362,9 @@ export class LocalReaderView extends ItemView {
         }
     }
     // Handle navigation info
-    setEphemeralState(state: any): void {
-        if (state && state.subpath) {
-            const subpath = state.subpath;
+    setEphemeralState(state: unknown): void {
+        const subpath = (state as { subpath?: unknown } | null)?.subpath;
+        if (typeof subpath === "string") {
             const navigationInfo = this.parseNavigationInfo(subpath);
 
             if (navigationInfo) {
@@ -353,18 +376,21 @@ export class LocalReaderView extends ItemView {
     }
 
     // Parse navigation info
-    parseNavigationInfo(subpath: string): any {
+    parseNavigationInfo(subpath: string): ReaderNavigation | null {
         //Regex to match annotation=url_encoded_string
         const match = subpath.match(/annotation=([^&]+)/);
         if (match && match[1]) {
-            return JSON.parse(decodeURIComponent(match[1]));
+            return JSON.parse(decodeURIComponent(match[1])) as ReaderNavigation;
         }
         return null;
     }
 
-    readerNavigate(navigationInfo: any) {
+    readerNavigate(navigationInfo: ReaderNavigation) {
         if (!this.bridge) return;
-        this.bridge.navigate(navigationInfo);
+        ff(
+            this.bridge.navigate(navigationInfo),
+            "Failed to navigate the reader",
+        );
     }
 
     async onClose() {
@@ -439,7 +465,7 @@ export class LocalReaderView extends ItemView {
     /**
      * Handle saved/updated annotations
      */
-    private async handleAnnotationsSaved(annotations: any[]) {
+    private async handleAnnotationsSaved(annotations: AnnotationJSON[]) {
         if (this.dataManager) {
             for (const annotation of annotations) {
                 const isVisual =
@@ -466,10 +492,10 @@ export class LocalReaderView extends ItemView {
                 this.file,
             )?.path;
             for (const annotation of annotations) {
-                const id = (annotation as AnnotationJSON).id;
+                const id = annotation.id;
                 if (this.knownAnnotationIds.has(id)) continue;
                 this.knownAnnotationIds.add(id);
-                await copyAnnotationOnCreate(annotation as AnnotationJSON, {
+                await copyAnnotationOnCreate(annotation, {
                     sourceNotePath,
                 });
             }

@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     API_KEY,
     createAnnotationHarness,
+    db,
     GROUP_ID,
     makeAnnotationJson,
     USER_ID,
@@ -135,6 +136,75 @@ describe("round trip: reader JSON -> IDB -> reader JSON", () => {
 });
 
 /* ================================================================ */
+/*  Field mapping (db/annotation.ts)                                */
+/* ================================================================ */
+
+describe("annotationItemFromJSON: field mapping", () => {
+    it("defaults a missing author name to an empty string", async () => {
+        const attachment = await h.seedAttachment("ATTACH01");
+        await h.service.saveAnnotations(attachment, h.keyInfo, [
+            makeAnnotationJson("ANNO0001"),
+        ]);
+
+        // Not `undefined`: the field is sent to the Zotero API as-is.
+        expect((await h.getRow("ANNO0001"))!.raw.data.annotationAuthorName).toBe(
+            "",
+        );
+    });
+
+    it("keeps an author name the reader supplied", async () => {
+        const attachment = await h.seedAttachment("ATTACH01");
+        await h.service.saveAnnotations(attachment, h.keyInfo, [
+            makeAnnotationJson("ANNO0001", { authorName: "Ada Lovelace" }),
+        ]);
+
+        expect((await h.getRow("ANNO0001"))!.raw.data.annotationAuthorName).toBe(
+            "Ada Lovelace",
+        );
+    });
+
+    it.each(["highlight", "underline"] as const)(
+        "carries the quoted text of a %s",
+        async (type) => {
+            const attachment = await h.seedAttachment("ATTACH01");
+            await h.service.saveAnnotations(attachment, h.keyInfo, [
+                makeAnnotationJson("ANNO0001", { type, text: "quoted words" }),
+            ]);
+
+            expect((await h.getRow("ANNO0001"))!.raw.data.annotationText).toBe(
+                "quoted words",
+            );
+        },
+    );
+
+    it("carries the external flag", async () => {
+        const attachment = await h.seedAttachment("ATTACH01");
+        await h.service.saveAnnotations(attachment, h.keyInfo, [
+            makeAnnotationJson("ANNO0001", { isExternal: true }),
+        ]);
+
+        expect(
+            (await h.getRow("ANNO0001"))!.raw.data.annotationIsExternal,
+        ).toBe(true);
+    });
+
+    it("stores a missing position as an empty object", async () => {
+        // The type says `position` is required, but the PDF extractor builds
+        // these from untyped parse output, so the copy is what actually keeps
+        // `JSON.stringify(undefined)` from writing `undefined` to the field.
+        const attachment = await h.seedAttachment("ATTACH01");
+        const json = makeAnnotationJson("ANNO0001");
+        delete (json as unknown as Record<string, unknown>).position;
+
+        await h.service.saveAnnotations(attachment, h.keyInfo, [json]);
+
+        expect(
+            (await h.getRow("ANNO0001"))!.raw.data.annotationPosition,
+        ).toBe("{}");
+    });
+});
+
+/* ================================================================ */
 /*  Reading (db/annotation.ts)                                      */
 /* ================================================================ */
 
@@ -149,6 +219,35 @@ describe("getAnnotations", () => {
         expect(await h.service.getAnnotations(notAnAttachment, API_KEY)).toEqual(
             [],
         );
+    });
+
+    it("reports a missing external flag as false, not undefined", async () => {
+        // `annotationIsExternal` is ZotFlow's own field — sync strips it before
+        // pushing — so a row that came down from Zotero does not have it at
+        // all. The seeder always writes it, so remove it to get the real shape.
+        const attachment = await h.seedAttachment("ATTACH01");
+        await h.seedAnnotation("ANNO0001", "ATTACH01");
+        const row = (await h.getRow("ANNO0001"))!;
+        delete (row.raw.data as { annotationIsExternal?: boolean })
+            .annotationIsExternal;
+        await db.items.put(row);
+
+        const [back] = await h.service.getAnnotations(attachment, API_KEY);
+        // The reader reads this field, so it has to be a boolean either way.
+        expect(back!.isExternal).toBe(false);
+    });
+
+    it("reports dateCreated as the date added, not the date modified", async () => {
+        const attachment = await h.seedAttachment("ATTACH01");
+        await h.seedAnnotation("ANNO0001", "ATTACH01", {
+            dateAdded: "2020-01-01T00:00:00.000Z",
+            dateModified: "2024-12-31T00:00:00.000Z",
+        });
+
+        const [back] = await h.service.getAnnotations(attachment, API_KEY);
+        expect(back!.dateCreated).toBe("2020-01-01T00:00:00.000Z");
+        expect(back!.dateAdded).toBe("2020-01-01T00:00:00.000Z");
+        expect(back!.dateModified).toBe("2024-12-31T00:00:00.000Z");
     });
 
     it("hides soft-deleted annotations", async () => {
@@ -432,7 +531,7 @@ describe("saveAnnotations: create", () => {
             await h.service.saveAnnotations(attachment, h.keyInfo, [
                 makeAnnotationJson("VISUAL01", {
                     type,
-                    image: "data:image/png;base64,AAAA" as any,
+                    image: "data:image/png;base64,AAAA",
                 }),
             ]);
 
@@ -446,7 +545,7 @@ describe("saveAnnotations: create", () => {
         const attachment = await h.seedAttachment("ATTACH01");
 
         await h.service.saveAnnotations(attachment, h.keyInfo, [
-            makeAnnotationJson("ANNO0001", { image: "data:x" as any }),
+            makeAnnotationJson("ANNO0001", { image: "data:x" }),
         ]);
 
         expect(h.noteService.savedImages).toEqual([]);
@@ -457,7 +556,7 @@ describe("saveAnnotations: create", () => {
         h.noteService.failSaveImage = true;
 
         const result = await h.service.saveAnnotations(attachment, h.keyInfo, [
-            makeAnnotationJson("VISUAL01", { type: "image", image: "x" as any }),
+            makeAnnotationJson("VISUAL01", { type: "image", image: "x" }),
         ]);
 
         // The annotation itself must still be recorded.

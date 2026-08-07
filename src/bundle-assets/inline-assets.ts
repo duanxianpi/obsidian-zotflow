@@ -1,6 +1,5 @@
 import { gunzipSync } from "fflate";
 import { patchPDFJSViewerHTML } from "./patch-inlined-assets";
-// @ts-expect-error esbuild virtual module "virtual:reader-resources"
 import resourceContext, { resourceKeys } from "virtual:reader-resources";
 
 const mimeTypes: Record<string, string> = {
@@ -49,7 +48,7 @@ function initializeBlobUrls(): Record<string, string> {
     const BLOB_BINARY_MAP: Record<string, { type: string; data: Uint8Array }> =
         {};
 
-    const keys = resourceKeys() as string[];
+    const keys = resourceKeys();
 
     keys.forEach((key) => {
         // Get Gzip Base64
@@ -59,6 +58,13 @@ function initializeBlobUrls(): Record<string, string> {
         // Calculate MIME
         const ext = fileName.slice(fileName.lastIndexOf("."));
         const type = mimeTypes[ext] || "application/octet-stream";
+
+        // Both sides come from the same build step, so a key with no contents
+        // means the two fell out of step rather than a missing file.
+        if (gzippedBase64 === undefined) {
+            console.error(`No bundled contents for ${fileName}`);
+            return;
+        }
 
         try {
             // Wait for unzipping

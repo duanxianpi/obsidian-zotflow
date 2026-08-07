@@ -4,6 +4,8 @@ import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "../ui/note-editor/view";
 import { workerBridge } from "../bridge";
 import { services } from "../services/services";
 
+import type { ReaderNavigation } from "types/zotero-reader";
+
 /**
  * Open an attachment in the default application.
  * @param libraryID The library ID of the attachment.
@@ -15,7 +17,7 @@ export async function openAttachment(
     libraryID: number,
     key: string,
     app: App,
-    navigationInfo?: any,
+    navigationInfo?: string,
 ) {
     // Update last accessed timestamp
     workerBridge.dbHelper.updateLastAccessed(libraryID, key).catch(() => {
@@ -50,12 +52,12 @@ export async function openAttachment(
             },
         });
 
-        app.workspace.revealLeaf(activeLeaf);
+        void app.workspace.revealLeaf(activeLeaf);
     }
 
     if (navigationInfo) {
         (activeLeaf.view as ZoteroReaderView).readerNavigate(
-            JSON.parse(navigationInfo),
+            JSON.parse(navigationInfo) as ReaderNavigation,
         );
     }
 }
@@ -70,13 +72,13 @@ export async function openSourceNote(file: TFile, app: App): Promise<void> {
         const view = leaf.view;
         if (view instanceof MarkdownView && view.file?.path === file.path) {
             app.workspace.setActiveLeaf(leaf);
-            app.workspace.revealLeaf(leaf);
+            void app.workspace.revealLeaf(leaf);
             return;
         }
     }
     const leaf = app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    app.workspace.revealLeaf(leaf);
+    void app.workspace.revealLeaf(leaf);
 }
 
 /**
@@ -146,13 +148,13 @@ async function openSourceNoteView(
         const view = leaf.view;
         if (view instanceof MarkdownView && view.file?.path === file.path) {
             app.workspace.setActiveLeaf(leaf);
-            app.workspace.revealLeaf(leaf);
+            void app.workspace.revealLeaf(leaf);
             return view;
         }
     }
     const leaf = app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    app.workspace.revealLeaf(leaf);
+    void app.workspace.revealLeaf(leaf);
     return leaf.view instanceof MarkdownView ? leaf.view : null;
 }
 
@@ -203,6 +205,6 @@ export async function openItemNoteInEditor(
             active: true,
             state: { libraryID, noteKey },
         });
-        app.workspace.revealLeaf(activeLeaf);
+        void app.workspace.revealLeaf(activeLeaf);
     }
 }

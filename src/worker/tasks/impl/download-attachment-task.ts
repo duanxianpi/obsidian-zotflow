@@ -31,8 +31,6 @@ export class DownloadAttachmentTask extends BaseTask {
         private attachmentItem: IDBZoteroItem<AttachmentData>,
     ) {
         super("download-attachment", parentHost);
-        const filename =
-            this.attachmentItem.raw.data.filename || this.attachmentItem.key;
         this.displayText = `Downloading Attachment`;
         this.taskInput = {
             libraryID: this.attachmentItem.libraryID,

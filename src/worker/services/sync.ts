@@ -3,15 +3,58 @@ import { ZoteroAPIService } from "./zotero";
 import { LibraryService } from "./library";
 import { normalizeItem, normalizeCollection, toZoteroDate } from "db/normalize";
 import pLimit from "p-limit";
-import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import {
+    errorMessage,
+    errorStatus,
+    ZotFlowError,
+    ZotFlowErrorCode,
+} from "utils/error";
 
 import type { ZotFlowSettings } from "settings/types";
 import type { IParentProxy } from "bridge/types";
 import type { ItemIdentifier } from "worker/tasks/impl/batch-extract-images-task";
+import type { AnyZoteroItem, ZoteroCollection } from "types/zotero";
+import type {
+    AnyIDBZoteroItem,
+    IDBZoteroCollection,
+} from "types/db-schema";
 
 const PULL_BULK_SIZE = 100;
 const UPDATE_BULK_SIZE = 50;
 const MAX_PUSH_RETRIES = 3;
+
+/**
+ * An item envelope prepared for Zotero's multi-write endpoint. Only the fields
+ * the payload builder rewrites are named; the rest of the item's own data is
+ * passed through untouched, which is why `data` stays open.
+ */
+interface WritePayload {
+    key?: string;
+    version?: number;
+    data: {
+        key?: string;
+        version?: number;
+        dateAdded?: string;
+        dateModified?: string;
+        /** ZotFlow-only; stripped before the item is sent. */
+        annotationIsExternal?: boolean;
+        [field: string]: unknown;
+    };
+}
+
+/**
+ * What the server echoes back for one item in a multi-write response: either
+ * the stored item, or — for an item Zotero reports as unchanged — a marker the
+ * push loop synthesises so both cases can be handled together.
+ */
+type WriteEcho = AnyZoteroItem | { key: string; version: number; isUnchanged: true };
+
+/** Zotero's multi-write response body, keyed by the item's index in the chunk. */
+interface WriteResponse {
+    successful?: Record<string, AnyZoteroItem>;
+    unchanged?: Record<string, unknown>;
+    failed?: Record<string, { code?: number; message?: string }>;
+}
 
 /** Bidirectional sync engine — pulls items/collections from Zotero and pushes local changes. */
 export class SyncService {
@@ -241,13 +284,18 @@ export class SyncService {
                 changedItems,
                 syncedLibraryIDs: activeLibraries,
             };
-        } catch (error: any) {
+        } catch (error) {
             // Catastrophic failure (e.g., DB crash)
-            this.parentHost.log("error", error.message, "SyncService", error);
+            this.parentHost.log(
+                "error",
+                errorMessage(error),
+                "SyncService",
+                error,
+            );
 
             this.parentHost.notify(
                 "error",
-                `Critical Sync Failure: ${error.message}`,
+                `Critical Sync Failure: ${errorMessage(error)}`,
             );
             throw error; // Re-throw so TaskLayer can track it as failed
         } finally {
@@ -293,7 +341,10 @@ export class SyncService {
                 includeTrashed: true,
             });
 
-            const versionsMap = await response.raw.json();
+            const versionsMap = (await (response.raw as Response).json()) as Record<
+                string,
+                number
+            >;
             const serverHeaderVersion = response.getVersion() || 0;
 
             // Early Return
@@ -318,7 +369,7 @@ export class SyncService {
                         collectionKey: slice.join(","),
                         includeTrashed: true,
                     });
-                    const newCollections = batchRes.raw;
+                    const newCollections = batchRes.raw as ZoteroCollection[];
 
                     if (newCollections.length > 0) {
                         // Collections are pull-only: nothing in the plugin
@@ -326,7 +377,7 @@ export class SyncService {
                         // there is no local state to read first.
                         await db.transaction("rw", db.collections, async () => {
                             await db.collections.bulkPut(
-                                newCollections.map((remoteRaw: any) =>
+                                newCollections.map((remoteRaw) =>
                                     normalizeCollection(remoteRaw, libraryID),
                                 ),
                             );
@@ -352,7 +403,9 @@ export class SyncService {
             // Handle Deletions (Safe Cascade)
             if (localVersion > 0) {
                 const delResponse = await libHandle.deleted(localVersion).get();
-                const deletedKeys = delResponse.getData().collections;
+                const deletedKeys = (
+                    delResponse.getData() as { collections: string[] }
+                ).collections;
 
                 if (deletedKeys.length > 0) {
                     await this.handlePullCollectionDeletions(
@@ -366,7 +419,7 @@ export class SyncService {
             await db.libraries.update(libraryID, {
                 collectionVersion: serverHeaderVersion,
             });
-        } catch (e: any) {
+        } catch (e) {
             throw ZotFlowError.wrap(
                 e,
                 ZotFlowErrorCode.NETWORK_ERROR,
@@ -421,7 +474,7 @@ export class SyncService {
         libraryID: number,
         parentKey: string,
         visited: Set<string> = new Set(),
-    ): Promise<any[]> {
+    ): Promise<IDBZoteroCollection[]> {
         // Guard: empty parentKey would match ALL top-level collections
         if (!parentKey) return [];
 
@@ -481,7 +534,10 @@ export class SyncService {
                 includeTrashed: true,
             });
 
-            const versionsMap = await response.raw.json();
+            const versionsMap = (await (response.raw as Response).json()) as Record<
+                string,
+                number
+            >;
             const serverHeaderVersion = response.getVersion() || 0;
 
             if (serverHeaderVersion <= localVersion) {
@@ -514,10 +570,10 @@ export class SyncService {
                         include: "data,csljson",
                     });
 
-                    const newItems = batchRes.raw;
+                    const newItems = batchRes.raw as AnyZoteroItem[];
 
                     const collectionUpdate = Promise.all(
-                        newItems.map(async (newItem: any) => {
+                        newItems.map(async (newItem) => {
                             const localItem = await db.items.get([
                                 libraryID,
                                 newItem.key,
@@ -571,7 +627,9 @@ export class SyncService {
             // Handle Deletions
             if (localVersion > 0) {
                 const delResponse = await libHandle.deleted(localVersion).get();
-                const deletedKeys = delResponse.getData().items;
+                const deletedKeys = (
+                    delResponse.getData() as { items?: string[] }
+                ).items;
 
                 if (deletedKeys && deletedKeys.length > 0) {
                     await this.handlePullDeletions(
@@ -590,7 +648,7 @@ export class SyncService {
                 `Item sync finished. New Version: ${serverHeaderVersion}`,
                 "SyncService",
             );
-        } catch (e: any) {
+        } catch (e) {
             throw ZotFlowError.wrap(
                 e,
                 ZotFlowErrorCode.NETWORK_ERROR,
@@ -692,9 +750,9 @@ export class SyncService {
                     for (const member of family) {
                         if (
                             member.itemType === "annotation" &&
-                            ((member.raw as any)?.data?.annotationType ===
+                            (member.raw?.data?.annotationType ===
                                 "image" ||
-                                (member.raw as any)?.data?.annotationType ===
+                                member.raw?.data?.annotationType ===
                                     "ink")
                         ) {
                             imageKeysToDelete.push(member.key);
@@ -747,7 +805,7 @@ export class SyncService {
         libraryID: number,
         parentKey: string,
         visited: Set<string> = new Set(),
-    ): Promise<any[]> {
+    ): Promise<AnyIDBZoteroItem[]> {
         // Guard: empty parentKey would match ALL top-level items
         if (!parentKey) return [];
 
@@ -871,11 +929,9 @@ export class SyncService {
                             `Successfully deleted: ${item.key}`,
                             "SyncService",
                         );
-                    } catch (e: any) {
+                    } catch (e) {
                         // Error Handling logic preserved from original business logic
-                        const status = e.response
-                            ? e.response.status
-                            : e.code || 0;
+                        const status = errorStatus(e);
 
                         if (status === 412) {
                             this.parentHost.log(
@@ -895,7 +951,7 @@ export class SyncService {
                                 "error",
                                 `Failed to delete ${item.key}:`,
                                 "SyncService",
-                                e.message,
+                                errorMessage(e),
                             );
                             // We don't throw here to avoid stopping the batch
                         }
@@ -912,7 +968,13 @@ export class SyncService {
             for (const chunk of chunks) {
                 // Prepare Payload & Sanitization
                 const payload = chunk.map((item) => {
-                    const itemRawData = { ...item.raw } as any;
+                    // `data` is copied too: a spread of the envelope alone
+                    // shares it with the stored item, and everything below
+                    // writes into `data`.
+                    const itemRawData = {
+                        ...item.raw,
+                        data: { ...item.raw.data },
+                    } as unknown as WritePayload;
 
                     if (itemRawData.data.dateAdded)
                         itemRawData.data.dateAdded = toZoteroDate(
@@ -955,20 +1017,21 @@ export class SyncService {
                         latestVersion = postVersion;
                     }
 
-                    const resData = response.raw as any;
+                    const resData = response.raw as WriteResponse;
                     const successful = resData.successful || {};
                     const failed = resData.failed || {};
                     const unchanged = resData.unchanged || {};
 
-                    const validUpdates: any[] = [];
+                    const validUpdates: AnyIDBZoteroItem[] = [];
                     const idsToDelete: string[] = [];
 
                     // Process each item in the chunk
                     chunk.forEach((item, index) => {
                         const indexStr = String(index);
                         const itemKey = item.key;
-                        let serverResponseItem = null;
-                        let failData = null;
+                        let serverResponseItem: WriteEcho | null = null;
+                        let failData: { code?: number; message?: string } | null =
+                            null;
 
                         // Handle created items
                         if (item.syncStatus === "created") {
@@ -995,33 +1058,33 @@ export class SyncService {
                         }
 
                         if (serverResponseItem) {
+                            const echo = serverResponseItem;
                             const newItem = {
                                 ...item,
                                 syncStatus: "synced",
                                 syncError: undefined,
-                                version:
-                                    serverResponseItem.version || item.version,
-                            };
+                                version: echo.version || item.version,
+                            } as AnyIDBZoteroItem;
 
-                            if (serverResponseItem.data) {
-                                newItem.raw = serverResponseItem;
+                            if ("data" in echo) {
+                                newItem.raw = echo;
                                 // For created items the server should echo
                                 // back our client-provided key. If it differs
                                 // (edge case), fall back to delete-old/insert-new.
                                 if (
                                     item.syncStatus === "created" &&
-                                    serverResponseItem.key !== item.key
+                                    echo.key !== item.key
                                 ) {
-                                    newItem.key = serverResponseItem.key;
-                                    newItem.raw.key = serverResponseItem.key;
+                                    newItem.key = echo.key;
+                                    newItem.raw.key = echo.key;
                                     idsToDelete.push(item.key);
                                 }
-                            } else if (!serverResponseItem.isUnchanged) {
+                            } else if (!echo.isUnchanged) {
                                 if (
                                     item.syncStatus === "created" &&
-                                    serverResponseItem.key !== item.key
+                                    echo.key !== item.key
                                 ) {
-                                    newItem.key = serverResponseItem.key;
+                                    newItem.key = echo.key;
                                     idsToDelete.push(item.key);
                                 }
                             }
@@ -1054,8 +1117,8 @@ export class SyncService {
                             }
                         });
                     }
-                } catch (e: any) {
-                    const status = e.response?.status ?? e.code ?? 0;
+                } catch (e) {
+                    const status = errorStatus(e);
                     if (status === 412) {
                         this.parentHost.log(
                             "warn",

@@ -35,8 +35,6 @@ import type {
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
 import type { AnnotationJSON } from "types/zotero-reader";
-import type { SaveAnnotationsResult } from "./services/annotation";
-import type { LibraryRow } from "./services/key";
 import type { DbHelperService as DbHelperServiceType } from "./services/db-helper";
 import type { TagService as TagServiceType } from "./services/tag";
 
@@ -44,6 +42,14 @@ import type { TagService as TagServiceType } from "./services/tag";
  * Worker API definition
  * This interface defines the methods exposed by the worker
  */
+/**
+ * A worker service handed across the Comlink boundary. The getters below
+ * return `Comlink.proxy(...)`, so the value really is proxy-marked; declaring
+ * that is what makes `Remote<WorkerAPI>` type these as proxies whose methods
+ * return promises, rather than as values to be structured-cloned.
+ */
+type Exposed<T> = T & Comlink.ProxyMarked;
+
 export interface WorkerAPI {
     init(
         settings: ZotFlowSettings,
@@ -51,26 +57,26 @@ export interface WorkerAPI {
         blobUrls: Record<string, string>,
     ): void;
     dispose(): void;
-    zotero: ZoteroAPIService;
-    sync: SyncService;
-    attachment: AttachmentService;
-    webdav: WebDavService;
-    treeView: TreeViewService;
-    libraryNote: LibraryNoteService;
-    itemNote: ItemNoteService;
-    localNote: LocalNoteService;
-    conflict: ConflictService;
-    annotation: AnnotationService;
-    key: KeyService;
-    library: LibraryService;
-    dbHelper: DbHelperServiceType;
-    tag: TagServiceType;
-    pdfProcessor: PDFProcessWorker;
-    libraryTemplate: LibraryTemplateService;
-    localTemplate: LocalTemplateService;
-    notePath: NotePathService;
-    cslRender: CslRenderWorkerService;
-    tasks: TaskManager;
+    zotero: Exposed<ZoteroAPIService>;
+    sync: Exposed<SyncService>;
+    attachment: Exposed<AttachmentService>;
+    webdav: Exposed<WebDavService>;
+    treeView: Exposed<TreeViewService>;
+    libraryNote: Exposed<LibraryNoteService>;
+    itemNote: Exposed<ItemNoteService>;
+    localNote: Exposed<LocalNoteService>;
+    conflict: Exposed<ConflictService>;
+    annotation: Exposed<AnnotationService>;
+    key: Exposed<KeyService>;
+    library: Exposed<LibraryService>;
+    dbHelper: Exposed<DbHelperServiceType>;
+    tag: Exposed<TagServiceType>;
+    pdfProcessor: Exposed<PDFProcessWorker>;
+    libraryTemplate: Exposed<LibraryTemplateService>;
+    localTemplate: Exposed<LocalTemplateService>;
+    notePath: Exposed<NotePathService>;
+    cslRender: Exposed<CslRenderWorkerService>;
+    tasks: Exposed<TaskManager>;
     updateSettings(settings: ZotFlowSettings): void;
 
     // Task factory methods
@@ -159,7 +165,13 @@ const exposedApi: WorkerAPI = {
         blobUrls: Record<string, string>,
     ) => {
         // Patch global fetch to proxy through Obsidian Main Thread
-        (globalThis as any).originalFetch = (globalThis as any).fetch;
+        // The worker global has no `originalFetch`; we are adding it so the
+        // proxy can be unwound.
+        const workerGlobal = self as unknown as {
+            fetch: unknown;
+            originalFetch?: unknown;
+        };
+        workerGlobal.originalFetch = workerGlobal.fetch;
         const proxiedFetchImpl = async (url: string, init?: RequestInit) => {
             try {
                 const response = await parentHost.request({
@@ -193,7 +205,7 @@ const exposedApi: WorkerAPI = {
                 );
             }
         };
-        (globalThis as any).fetch = proxiedFetchImpl;
+        workerGlobal.fetch = proxiedFetchImpl;
 
         // Also expose via module import (see proxied-fetch.ts) so worker
         // code can use it without referencing lint-restricted globals.
@@ -511,8 +523,8 @@ const exposedApi: WorkerAPI = {
         return _taskManager!.createSyncTask(
             _sync!,
             libraryId,
-            _libraryNote!,
-            _currentSettings!,
+            _libraryNote,
+            _currentSettings,
         );
     },
 

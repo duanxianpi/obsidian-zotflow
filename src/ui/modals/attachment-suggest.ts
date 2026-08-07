@@ -1,10 +1,12 @@
-import { App, SuggestModal, setIcon } from "obsidian";
-import { getAttachmentFileIcon } from "ui/icons";
+import { App, SuggestModal } from "obsidian";
 import { openAttachment } from "utils/viewer";
 
 import type { AttachmentData } from "types/zotero-item";
 import type { IDBZoteroItem, AnyIDBZoteroItem } from "types/db-schema";
 import type { ZoteroSearchModal } from "./suggest";
+import { fireAndForgetIn } from "utils/fire-and-forget";
+
+const ff = fireAndForgetIn("AttachmentSelectModal");
 
 interface ActionOption {
     label: string;
@@ -27,7 +29,7 @@ export class AttachmentSelectModal extends SuggestModal<ActionOption> {
 
     // When modal opens, hide parent modal
     onOpen() {
-        super.onOpen();
+        void super.onOpen();
         this.parentModal?.containerEl.hide();
     }
 
@@ -123,10 +125,13 @@ export class AttachmentSelectModal extends SuggestModal<ActionOption> {
         super.selectSuggestion(option, evt);
     }
 
-    async onChooseSuggestion(
+    onChooseSuggestion(
         option: ActionOption,
         evt: MouseEvent | KeyboardEvent,
-    ) {
-        await openAttachment(option.item.libraryID, option.item.key, this.app);
+    ): void {
+        ff(
+            openAttachment(option.item.libraryID, option.item.key, this.app),
+            "Failed to open the attachment",
+        );
     }
 }

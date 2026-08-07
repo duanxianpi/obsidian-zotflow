@@ -6,7 +6,6 @@ import { services } from "services/services";
 import type {
     ConflictItemInfo,
     ConflictAction,
-    FieldDiff,
 } from "worker/services/conflict";
 import type { LibraryRow } from "worker/services/key";
 
@@ -516,8 +515,8 @@ export const SyncView: React.FC = () => {
                     libraries={libraries}
                     syncingAll={syncingAll}
                     syncingLibId={syncingLibId}
-                    onSyncLibrary={handleSyncLibrary}
-                    onSyncAll={handleSyncAll}
+                    onSyncLibrary={(id) => void handleSyncLibrary(id)}
+                    onSyncAll={() => void handleSyncAll()}
                 />
             </div>
 
@@ -535,7 +534,7 @@ export const SyncView: React.FC = () => {
                     conflicts={conflicts}
                     selectedKey={selectedConflict}
                     onSelect={setSelectedConflict}
-                    onResolve={handleResolve}
+                    onResolve={(entry, action) => void handleResolve(entry, action)}
                 />
                 {hasResolvedConflicts && conflicts.length === 0 && (
                     <div className="zotflow-sync-reminder">

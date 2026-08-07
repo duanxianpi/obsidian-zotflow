@@ -1,17 +1,12 @@
 import { db, getCombinations } from "db/db";
 import { annotationItemFromJSON, getAnnotationJson } from "db/annotation";
 import { toZoteroDate } from "db/normalize";
-import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
 import type { IParentProxy } from "bridge/types";
-import type { LibraryNoteService, UpdateOptions } from "./library-note";
+import type { LibraryNoteService } from "./library-note";
 import type { ConvertService } from "./convert";
 import type { IDBZoteroItem, IDBZoteroKey } from "types/db-schema";
-import type {
-    AnnotationData,
-    AttachmentData,
-    ZoteroItemDataTypeMap,
-} from "types/zotero-item";
+import type { AnnotationData, AttachmentData } from "types/zotero-item";
 import type { AnnotationJSON } from "types/zotero-reader";
 
 /** Result returned by saveAnnotations so the caller knows whether a note update is needed. */
@@ -73,7 +68,7 @@ export class AnnotationService {
         const results: AnnotationJSON[] = [];
         for (const child of children) {
             const annots = await getAnnotationJson(
-                child as IDBZoteroItem<AttachmentData>,
+                child,
                 apiKey,
                 (item) => item.syncStatus !== "deleted",
             );
@@ -126,7 +121,7 @@ export class AnnotationService {
         for (const json of annotations) {
             const annotationData = annotationItemFromJSON(
                 json,
-            ) as Partial<AnnotationData>;
+            );
             const key = json.id;
             const existing = existingMap.get(key);
             const isVisual =
@@ -134,9 +129,9 @@ export class AnnotationService {
                 annotationData.annotationType === "ink";
 
             // Persist annotation image (fire & forget)
-            if (isVisual && (json as any).image) {
+            if (isVisual && json.image) {
                 this.noteService
-                    .saveBase64Image((json as any).image as string, key)
+                    .saveBase64Image(json.image, key)
                     .catch((e) => {
                         this.parentHost.log(
                             "error",
@@ -153,7 +148,7 @@ export class AnnotationService {
 
             if (existing) {
                 // === Update ===
-                if (!(json as any).isExternal) {
+                if (!json.isExternal) {
                     if (
                         this.annotationDataDiff(
                             existing.raw.data,
@@ -176,7 +171,7 @@ export class AnnotationService {
                                     ...existing.raw.data,
                                     ...annotationData,
                                     dateModified: zoteroDate,
-                                } as any,
+                                },
                             },
                         });
                     }
@@ -197,7 +192,7 @@ export class AnnotationService {
                     trashed: 0,
                     searchCreators: [],
                     searchTags: [],
-                    syncStatus: !(json as any).isExternal
+                    syncStatus: !json.isExternal
                         ? "created"
                         : "ignore",
                     syncedAt: now,
@@ -346,7 +341,7 @@ export class AnnotationService {
                         data: {
                             ...existing.raw.data,
                             deleted: true,
-                        } as any,
+                        },
                     },
                 });
             }
@@ -410,7 +405,7 @@ export class AnnotationService {
             return;
         }
 
-        const annotation = item as IDBZoteroItem<AnnotationData>;
+        const annotation = item;
 
         // External annotations (extracted from the embedded PDF) are
         // read-only — they are owned by the PDF, not by Zotero, and any
@@ -431,7 +426,7 @@ export class AnnotationService {
         if (annotation.raw.data.annotationComment === newComment) return;
 
         const updatedRaw = structuredClone(annotation.raw);
-        (updatedRaw.data as AnnotationData).annotationComment = newComment;
+        (updatedRaw.data).annotationComment = newComment;
 
         const now = new Date().toISOString();
         await db.items.update([libraryID, annotationKey], {

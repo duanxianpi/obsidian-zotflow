@@ -1,5 +1,10 @@
 import { EditorView, Decoration, type DecorationSet } from "@codemirror/view";
-import { StateField, type Extension, RangeSetBuilder } from "@codemirror/state";
+import {
+    StateField,
+    type Extension,
+    type Text,
+    RangeSetBuilder,
+} from "@codemirror/state";
 
 interface QueuedDeco {
     from: number;
@@ -20,7 +25,7 @@ export const zoteroBlockField = StateField.define<DecorationSet>({
     provide: (field) => EditorView.decorations.from(field),
 });
 
-function buildDecorations(doc: any): DecorationSet {
+function buildDecorations(doc: Text): DecorationSet {
     const builder = new RangeSetBuilder<Decoration>();
     const queuedDecos: QueuedDeco[] = [];
     const text = doc.toString();
