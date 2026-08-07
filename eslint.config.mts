@@ -135,9 +135,9 @@ export default defineConfig(
             // Test output IS console output: the syntax-survival matrix and the
             // fixture reports are the deliverable, not stray debug logging.
             "obsidianmd/rule-custom-message": "off",
-            // `@codemirror/state` reaches tests through `obsidian`'s own tree
-            // and is an esbuild external at build time. Declaring it directly
-            // would pin a second copy that the plugin never runs against.
+            // CodeMirror is externalized from the plugin bundle and declared
+            // directly only to type-check source; tests run against that same
+            // installed version rather than a bundled runtime copy.
             "import/no-extraneous-dependencies": "off",
             // Build/test tooling runs in Node, never in the plugin bundle.
             "obsidianmd/no-nodejs-modules": "off",

@@ -263,7 +263,7 @@ export class PDFProcessWorker {
                 // failures, so the promise is marked rather than returned.
                 void (async () => {
                     const message = event.data;
-    
+
                     // Handle Response (Worker -> Main Request)
                     if (message.responseID !== undefined) {
                         const resolver =
@@ -294,12 +294,12 @@ export class PDFProcessWorker {
                         }
                         return;
                     }
-    
+
                     // Handle Request (Worker -> Main Request)
                     if (message.id !== undefined) {
                         let responseData: unknown = null;
                         let responseError: { message: string } | null = null;
-    
+
                         try {
                             if (message.action === "FetchBuiltInCMap") {
                                 if (typeof message.data !== "string") {
@@ -340,7 +340,7 @@ export class PDFProcessWorker {
                             );
                             responseError = { message: getErrorMessage(e) };
                         }
-    
+
                         try {
                             if (message.action === "FetchStandardFontData") {
                                 if (typeof message.data !== "string") {
@@ -378,7 +378,7 @@ export class PDFProcessWorker {
                             );
                             responseError = { message: getErrorMessage(e) };
                         }
-    
+
                         try {
                             if (message.action === "SaveRenderedAnnotation") {
                                 if (
@@ -392,7 +392,7 @@ export class PDFProcessWorker {
                                 }
                                 const { libraryID, annotationKey, buf } =
                                     message.data;
-    
+
                                 await db.items
                                     .where({ libraryID, key: annotationKey })
                                     .modify((item) => {
@@ -404,12 +404,12 @@ export class PDFProcessWorker {
                                         "",
                                     );
                                 const path = `${folder}/${annotationKey}.png`;
-    
+
                                 await this.parentHost.writeBinaryFile(
                                     path,
                                     Comlink.transfer(buf, [buf]),
                                 );
-    
+
                                 responseData = true;
                             }
                         } catch (e) {

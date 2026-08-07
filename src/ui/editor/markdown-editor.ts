@@ -1,8 +1,29 @@
 /*
- * Ported from an existing Obsidian community plugin's embedded-editor helper.
- * It drives Obsidian's own unexported CodeMirror plumbing through
- * `monkey-around`. Internal API shapes come from `obsidian-typings`; the
- * runtime constructor still has to be discovered from an editable embed.
+ * Based on the EmbeddableMarkdownEditor helper by Matthew Meyers and Fevol,
+ * building on mgmeyers' Obsidian Kanban editor prototype discovery.
+ *
+ * Copyright 2024 Matthew Meyers, Fevol
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * Internal API shapes come from `obsidian-typings`; the runtime constructor
+ * still has to be discovered from an editable embed.
  */
 import { Scope } from "obsidian";
 
@@ -23,6 +44,7 @@ import type {
     ConstructorBase,
     EmbedComponent,
     EmbedContext,
+    EmbedRegistry,
     MarkdownScrollableEditView,
     WidgetEditorView,
 } from "@obsidian-typings/obsidian-public-1.11.4";
@@ -82,8 +104,10 @@ export function createEmbeddableMarkdownEditor(
  * Resolves the markdown editor prototype from the app
  */
 function resolveEditorPrototype(app: App): MarkdownEditorConstructor {
-    const embedCreators = app.embedRegistry.embedByExtension as typeof app
-        .embedRegistry.embedByExtension & {
+    const embedRegistry = (app as App & { embedRegistry: EmbedRegistry })
+        .embedRegistry;
+    const embedCreators = embedRegistry.embedByExtension as typeof embedRegistry
+        .embedByExtension & {
         md: MarkdownEmbedCreator;
     };
     const embedComponent = embedCreators.md(
