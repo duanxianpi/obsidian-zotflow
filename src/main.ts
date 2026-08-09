@@ -326,7 +326,7 @@ export default class ZotFlow extends Plugin {
             editorCallback: () => {
                 this.citationSuggest.triggerManually();
             },
-            hotkeys: [{ modifiers: ["Alt"], key: "c" }],
+            // hotkeys: [{ modifiers: ["Alt"], key: "c" }],
         });
 
         this.addCommand({
