@@ -134,11 +134,11 @@ export class SourceNotesSection {
             },
             {
                 type: "group",
-                heading: "Local Storage",
+                heading: "Zotero Storage",
                 items: [
                     {
-                        name: "Use Zotero Local Storage",
-                        desc: "Load attachments from the local Zotero storage directory instead of downloading from the Zotero sync service. Only works on desktop (requires filesystem access). On mobile, attachments are always loaded from the sync service.",
+                        name: "Use Zotero Storage Directory",
+                        desc: "Read stored attachments directly from Zotero's local storage directory instead of downloading them. Desktop only; mobile continues to use the configured sync service.",
                         control: {
                             type: "toggle",
                             key: "useZoteroStorage",
@@ -146,12 +146,12 @@ export class SourceNotesSection {
                     },
                     {
                         name: "Zotero Storage Path",
-                        desc: "Absolute path to the Zotero storage folder (e.g. C:\\Users\\david\\Zotero\\storage on Windows, /Users/david/Zotero/storage on macOS, ~/Zotero/storage on Linux). Required when local storage is enabled.",
+                        desc: "Absolute path to Zotero's storage directory. Enter the complete path without using a home-directory shortcut such as ~.",
                         control: {
                             type: "text",
                             key: "zoteroStoragePath",
                             placeholder:
-                                "e.g. C:\\Users\\david\\Zotero\\storage",
+                                "e.g. C:\\Users\\name\\Zotero\\storage",
                         },
                     },
                 ],

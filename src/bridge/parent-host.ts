@@ -68,6 +68,10 @@ export class ParentHost implements IParentProxy {
         return Platform.isAndroidApp;
     }
 
+    public async isDesktopApp(): Promise<boolean> {
+        return Platform.isDesktopApp;
+    }
+
     public async readTextFile(path: string): Promise<string | null> {
         return readTextFile(this.app, path);
     }
@@ -134,6 +138,9 @@ export class ParentHost implements IParentProxy {
                 `Cannot read a file outside the vault on mobile: ${absolutePath}`,
             );
         }
+        if (!Platform.isDesktopApp) {
+            throw new Error("External files require the Obsidian desktop app");
+        }
         try {
             // `require`, not `import()`: the plugin ships as CommonJS, and a
             // native dynamic import in Electron's renderer resolves against
@@ -159,6 +166,9 @@ export class ParentHost implements IParentProxy {
         // `readExternalBinaryFile`'s desktop-only constraint.
         if (!Platform.isDesktop) {
             throw new Error("Cannot resolve an OS path on mobile");
+        }
+        if (!Platform.isDesktopApp) {
+            throw new Error("OS paths require the Obsidian desktop app");
         }
         // Same CommonJS constraint as `readExternalBinaryFile`.
         // eslint-disable-next-line @typescript-eslint/no-require-imports -- see readExternalBinaryFile

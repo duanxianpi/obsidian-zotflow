@@ -11,9 +11,9 @@
  * See `tests/fakes/attachment-harness.ts` for what is real (the DB, SparkMD5)
  * and what is injected.
  *
- * Scope note: this covers the cache decision, the download lock, the MD5
- * integrity/repair rules and the LRU. The WebDAV zip-unpacking path and the
- * Android size guard are not covered yet.
+ * Scope note: this covers local Zotero storage, the cache decision, the
+ * download lock, the MD5 integrity/repair rules and the LRU. The WebDAV
+ * zip-unpacking path and the Android size guard are not covered yet.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -567,11 +567,15 @@ describe("local storage", () => {
             filename: "paper.pdf",
             contentType: "application/pdf",
         });
-        h.host.readExternalBinaryFile = async () => bytes(10, 20, 30);
+        const readExternalBinaryFile = vi.fn(async () => bytes(10, 20, 30));
+        h.host.readExternalBinaryFile = readExternalBinaryFile;
 
         const blob = await h.service.getFileBlob(item);
 
         expect(await readBlob(blob)).toEqual([10, 20, 30]);
+        expect(readExternalBinaryFile).toHaveBeenCalledWith(
+            "/fake/zotero/storage/ATTACH01/paper.pdf",
+        );
         expect(h.fetches).toEqual([]);
         expect(await h.getCached("ATTACH01")).toBeUndefined();
     });
@@ -611,12 +615,14 @@ describe("local storage", () => {
         );
         expect(
             h.host.notices.some(
-                (n) => n.type === "error" && n.message.includes("storage path"),
+                (notice) =>
+                    notice.type === "error" &&
+                    notice.message.includes("storage path"),
             ),
         ).toBe(true);
     });
 
-    it("throws RESOURCE_MISSING when the file does not exist on disk", async () => {
+    it("throws RESOURCE_MISSING when the file cannot be read", async () => {
         h = await createAttachmentHarness({
             settings: {
                 useZoteroStorage: true,
@@ -629,13 +635,32 @@ describe("local storage", () => {
         };
 
         await expect(h.service.getFileBlob(item)).rejects.toThrow(
-            /not found at/i,
+            /could not read the attachment/i,
         );
         expect(
             h.host.notices.some(
-                (n) => n.type === "error" && n.message.includes("not found"),
+                (notice) =>
+                    notice.type === "error" &&
+                    notice.message.includes("Could not read"),
             ),
         ).toBe(true);
+    });
+
+    it("rejects a filename that escapes the Zotero item directory", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/zotero/storage",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01", {
+            filename: "../secret.pdf",
+        });
+
+        await expect(h.service.getFileBlob(item)).rejects.toThrow(
+            /invalid attachment filename/i,
+        );
+        expect(h.fetches).toEqual([]);
     });
 
     it("never caches a local storage read", async () => {
@@ -654,9 +679,10 @@ describe("local storage", () => {
         expect(h.fetches).toEqual([]);
     });
 
-    it("falls through to the network on mobile even when local storage is enabled", async () => {
+    it("falls through to the network on Android", async () => {
         h = await createAttachmentHarness({
             isAndroid: true,
+            isDesktop: false,
             settings: {
                 useZoteroStorage: true,
                 zoteroStoragePath: "/fake/path",
@@ -669,6 +695,24 @@ describe("local storage", () => {
         const blob = await h.service.getFileBlob(item);
 
         expect(await readBlob(blob)).toEqual([1, 2, 3]);
+        expect(h.fetches).toHaveLength(1);
+    });
+
+    it("falls through to the network on iOS", async () => {
+        h = await createAttachmentHarness({
+            isAndroid: false,
+            isDesktop: false,
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/path",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01");
+        h.setApiPayload(bytes(3, 2, 1));
+
+        const blob = await h.service.getFileBlob(item);
+
+        expect(await readBlob(blob)).toEqual([3, 2, 1]);
         expect(h.fetches).toHaveLength(1);
     });
 

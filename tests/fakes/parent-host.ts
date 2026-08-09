@@ -79,6 +79,8 @@ export interface FakeParentHostOptions {
     keyIndex?: Record<string, string>;
     /** Value returned by `isAndroidApp()`. Defaults to false. */
     isAndroid?: boolean;
+    /** Value returned by `isDesktopApp()`. Defaults to the inverse of `isAndroid`. */
+    isDesktop?: boolean;
     /** Value returned by `getVaultConfig()`. Defaults to `{}`. */
     vaultConfig?: VaultConfig;
     /** Handler for `request()`. Unset means any HTTP call throws. */
@@ -206,6 +208,8 @@ export function createFakeParentHost(
 
         // Platform
         isAndroidApp: async () => options.isAndroid ?? false,
+        isDesktopApp: async () =>
+            options.isDesktop ?? !(options.isAndroid ?? false),
 
         // Filesystem
         readTextFile: async (path) => vault.get(path) ?? null,
