@@ -146,7 +146,7 @@ export class SourceNotesSection {
                     },
                     {
                         name: "Zotero Storage Path",
-                        desc: "Absolute path to Zotero's storage directory. Enter the complete path without using a home-directory shortcut such as ~.",
+                        desc: "Absolute path to Zotero's storage directory (e.g. C:\\Users\\name\\Zotero\\storage). Enter the complete path without using a home-directory shortcut such as ~.",
                         control: {
                             type: "text",
                             key: "zoteroStoragePath",
