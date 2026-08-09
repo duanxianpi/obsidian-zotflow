@@ -552,6 +552,178 @@ describe("cache maintenance API", () => {
 });
 
 /* ================================================================ */
+/*  Local storage                                                   */
+/* ================================================================ */
+
+describe("local storage", () => {
+    it("reads an imported_file from the local storage directory", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/zotero/storage",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01", {
+            filename: "paper.pdf",
+            contentType: "application/pdf",
+        });
+        h.host.readExternalBinaryFile = async () => bytes(10, 20, 30);
+
+        const blob = await h.service.getFileBlob(item);
+
+        expect(await readBlob(blob)).toEqual([10, 20, 30]);
+        expect(h.fetches).toEqual([]);
+        expect(await h.getCached("ATTACH01")).toBeUndefined();
+    });
+
+    it("reads an imported_url attachment with the correct mime type", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/zotero/storage",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01", {
+            linkMode: "imported_url",
+            filename: "snapshot.html",
+            contentType: "text/html",
+        });
+        h.host.readExternalBinaryFile = async () => bytes(1, 2, 3);
+
+        const blob = await h.service.getFileBlob(item);
+
+        expect(blob.type).toBe("text/html");
+        expect(await readBlob(blob)).toEqual([1, 2, 3]);
+        expect(h.fetches).toEqual([]);
+    });
+
+    it("throws CONFIG_MISSING when the storage path is empty", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01");
+
+        await expect(h.service.getFileBlob(item)).rejects.toThrow(
+            /storage path is not configured/i,
+        );
+        expect(
+            h.host.notices.some(
+                (n) => n.type === "error" && n.message.includes("storage path"),
+            ),
+        ).toBe(true);
+    });
+
+    it("throws RESOURCE_MISSING when the file does not exist on disk", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/zotero/storage",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01");
+        h.host.readExternalBinaryFile = async () => {
+            throw new Error("ENOENT: no such file");
+        };
+
+        await expect(h.service.getFileBlob(item)).rejects.toThrow(
+            /not found at/i,
+        );
+        expect(
+            h.host.notices.some(
+                (n) => n.type === "error" && n.message.includes("not found"),
+            ),
+        ).toBe(true);
+    });
+
+    it("never caches a local storage read", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/zotero/storage",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01");
+        h.host.readExternalBinaryFile = async () => bytes(5, 5, 5);
+
+        await h.service.getFileBlob(item);
+
+        expect(await h.getCached("ATTACH01")).toBeUndefined();
+        expect(h.fetches).toEqual([]);
+    });
+
+    it("falls through to the network on mobile even when local storage is enabled", async () => {
+        h = await createAttachmentHarness({
+            isAndroid: true,
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/path",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01");
+        h.setApiPayload(bytes(1, 2, 3));
+        // readExternalBinaryFile throws by default — if called, test fails
+
+        const blob = await h.service.getFileBlob(item);
+
+        expect(await readBlob(blob)).toEqual([1, 2, 3]);
+        expect(h.fetches).toHaveLength(1);
+    });
+
+    it("falls through to the network when local storage is disabled", async () => {
+        // Default settings: useZoteroStorage: false
+        const item = await h.seedAttachment("ATTACH01");
+        h.setApiPayload(bytes(7, 8, 9));
+        // readExternalBinaryFile throws by default — if called, test fails
+
+        const blob = await h.service.getFileBlob(item);
+
+        expect(await readBlob(blob)).toEqual([7, 8, 9]);
+        expect(h.fetches).toHaveLength(1);
+    });
+
+    it("does not interfere with linked_file attachments", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/storage",
+            },
+        });
+        const item = await h.seedAttachment("LINKED01", {
+            linkMode: "linked_file",
+            path: "/tmp/paper.pdf",
+        });
+        h.host.readExternalBinaryFile = async () => bytes(5, 5, 5);
+
+        const blob = await h.service.getFileBlob(item);
+
+        expect(await readBlob(blob)).toEqual([5, 5, 5]);
+        expect(h.fetches).toEqual([]);
+    });
+
+    it("does not interfere with linked_url attachments", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/fake/storage",
+            },
+        });
+        const item = await h.seedAttachment("LINKURL1", {
+            linkMode: "linked_url",
+        });
+        h.setApiPayload(bytes(1, 2, 3));
+
+        const blob = await h.service.getFileBlob(item);
+
+        expect(await readBlob(blob)).toEqual([1, 2, 3]);
+        expect(h.fetches).toHaveLength(1);
+        // readExternalBinaryFile throws by default — if called, test fails
+    });
+});
+
+/* ================================================================ */
 /*  Settings                                                        */
 /* ================================================================ */
 
