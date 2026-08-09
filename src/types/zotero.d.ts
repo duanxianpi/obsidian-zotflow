@@ -110,7 +110,7 @@ export type AnyZoteroItem = {
 
 declare module "./zotero-item" {
     interface AttachmentData {
-        linkMode: "imported_file" | "linked_file" | "imported_url";
+        linkMode: "imported_file" | "linked_file" | "imported_url" | "linked_url";
         contentType: string;
         filename: string;
         md5?: string;

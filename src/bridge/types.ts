@@ -30,6 +30,7 @@ export interface IParentProxy {
 
     // Platform
     isAndroidApp(): Promise<boolean>;
+    isDesktopApp(): Promise<boolean>;
 
     // Filesystem
     readTextFile(path: string): Promise<string | null>;

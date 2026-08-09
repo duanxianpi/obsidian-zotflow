@@ -60,6 +60,8 @@ export interface AttachmentHarnessOptions {
     settings?: Partial<ZotFlowSettings>;
     /** Value returned by `parentHost.isAndroidApp()`. */
     isAndroid?: boolean;
+    /** Value returned by `parentHost.isDesktopApp()`. */
+    isDesktop?: boolean;
 }
 
 export interface AttachmentHarness {
@@ -167,7 +169,10 @@ export async function createAttachmentHarness(
         },
     } as unknown as ZoteroAPIService;
 
-    const host = createFakeParentHost({ isAndroid: options.isAndroid ?? false });
+    const host = createFakeParentHost({
+        isAndroid: options.isAndroid ?? false,
+        isDesktop: options.isDesktop,
+    });
 
     /* -------- fetch stub for the Zotero file endpoint -------- */
     const fetches: string[] = [];

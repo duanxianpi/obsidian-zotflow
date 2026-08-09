@@ -22,7 +22,7 @@ const DEFAULT_TRIGGER = "@@";
 /**
  * Inline EditorSuggest for inserting Zotero citations.
  * Auto-triggers when the user types the configured trigger (default `@@`) in the editor.
- * Also triggered via the "Insert Citation" command (Alt+C).
+ * Also triggered via the "Insert Citation" command.
  */
 export class CitationSuggest extends EditorSuggest<SuggestionItem> {
     private manualTriggerStart: EditorPosition | null = null;

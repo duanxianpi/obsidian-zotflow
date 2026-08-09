@@ -61,6 +61,8 @@ export interface ZotFlowSettings {
     treeSingleClickOpen: boolean;
     convertNoteLinks: boolean;
     linkedAttachmentBaseDir: string;
+    useZoteroStorage: boolean;
+    zoteroStoragePath: string;
     defaultEditableRegionLocked: boolean;
     hideEditableRegionMarkers: boolean;
     alwaysOpenChildNoteInEditor: boolean;
@@ -137,6 +139,8 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     treeSingleClickOpen: false,
     convertNoteLinks: true,
     linkedAttachmentBaseDir: "",
+    useZoteroStorage: false,
+    zoteroStoragePath: "",
     defaultEditableRegionLocked: true,
     hideEditableRegionMarkers: false,
     alwaysOpenChildNoteInEditor: false,

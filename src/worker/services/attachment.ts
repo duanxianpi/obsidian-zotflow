@@ -84,6 +84,7 @@ export class AttachmentService {
                 itemKey,
                 useCache: this.settings.useCache,
                 useWebDav: this.settings.useWebDav,
+                useZoteroStorage: this.settings.useZoteroStorage,
             },
         );
 
@@ -120,8 +121,16 @@ export class AttachmentService {
             },
         );
 
-        // Check Cache (Fast Path), skip for linked files (read from disk each time)
         const linkMode = item.raw.data.linkMode;
+        if (
+            this.settings.useZoteroStorage &&
+            (linkMode === "imported_file" || linkMode === "imported_url") &&
+            (await this.parentHost.isDesktopApp())
+        ) {
+            return this.readFromLocalStorage(item);
+        }
+
+        // Check Cache (Fast Path), skip for linked files (read from disk each time)
         if (this.settings.useCache && linkMode !== "linked_file") {
             try {
                 this.parentHost.log(
@@ -907,6 +916,88 @@ export class AttachmentService {
                 `API Fetch Failed: ${(e as Error).message}`,
             );
         }
+    }
+
+    private async readFromLocalStorage(
+        item: IDBZoteroItem<AttachmentData>,
+    ): Promise<Blob> {
+        const storagePath = this.settings.zoteroStoragePath.trim();
+        if (!storagePath) {
+            const message =
+                "Zotero storage path is not configured. Configure Zotero Storage Path in ZotFlow settings.";
+            this.parentHost.notify("error", message);
+            throw new ZotFlowError(
+                ZotFlowErrorCode.CONFIG_MISSING,
+                "AttachmentService",
+                message,
+            );
+        }
+
+        const filename = this.requireStoragePathSegment(
+            item.raw.data.filename,
+            "attachment filename",
+        );
+        const itemKey = this.requireStoragePathSegment(item.key, "item key");
+        let filePath: string | undefined;
+        try {
+            filePath = await this.parentHost.joinPath(
+                storagePath,
+                itemKey,
+                filename,
+            );
+            this.parentHost.log(
+                "info",
+                "Reading attachment from Zotero storage.",
+                "AttachmentService",
+                { itemKey, filePath },
+            );
+            const buffer =
+                await this.parentHost.readExternalBinaryFile(filePath);
+            this.parentHost.log(
+                "debug",
+                "Zotero storage read complete.",
+                "AttachmentService",
+                {
+                    itemKey,
+                    filePath,
+                    bytes: buffer.byteLength,
+                },
+            );
+            return new Blob([buffer], {
+                type: item.raw.data.contentType || "application/pdf",
+            });
+        } catch (error) {
+            const message =
+                "Could not read the attachment from Zotero storage. Ensure Zotero has synced it locally and the configured storage path is correct.";
+            this.parentHost.notify("error", message);
+            throw ZotFlowError.wrap(
+                error,
+                ZotFlowErrorCode.RESOURCE_MISSING,
+                "AttachmentService",
+                message,
+                { itemKey, filePath, storagePath },
+            );
+        }
+    }
+
+    private requireStoragePathSegment(
+        value: string | undefined,
+        label: string,
+    ): string {
+        if (
+            !value ||
+            value === "." ||
+            value === ".." ||
+            value.includes("/") ||
+            value.includes("\\")
+        ) {
+            throw new ZotFlowError(
+                ZotFlowErrorCode.PARSE_ERROR,
+                "AttachmentService",
+                `Invalid ${label} for Zotero storage`,
+            );
+        }
+        return value;
     }
 
     /**

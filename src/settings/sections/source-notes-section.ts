@@ -132,6 +132,30 @@ export class SourceNotesSection {
                     },
                 ],
             },
+            {
+                type: "group",
+                heading: "Zotero Storage",
+                items: [
+                    {
+                        name: "Use Zotero Storage Directory",
+                        desc: "Read stored attachments directly from Zotero's local storage directory instead of downloading them. Desktop only; mobile continues to use the configured sync service.",
+                        control: {
+                            type: "toggle",
+                            key: "useZoteroStorage",
+                        },
+                    },
+                    {
+                        name: "Zotero Storage Path",
+                        desc: "Absolute path to Zotero's storage directory (e.g. C:\\Users\\name\\Zotero\\storage). Enter the complete path without using a home-directory shortcut such as ~.",
+                        control: {
+                            type: "text",
+                            key: "zoteroStoragePath",
+                            placeholder:
+                                "e.g. C:\\Users\\name\\Zotero\\storage",
+                        },
+                    },
+                ],
+            },
         ];
     }
 
