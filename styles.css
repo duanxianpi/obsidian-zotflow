@@ -230,9 +230,14 @@
 .zotflow-tag-suggestion {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
     font-size: var(--font-ui-small);
+}
+
+.zotflow-tag-suggestion-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ============================================================

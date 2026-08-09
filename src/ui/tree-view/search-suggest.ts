@@ -1,4 +1,4 @@
-import { AbstractInputSuggest } from "obsidian";
+import { AbstractInputSuggest, renderResults } from "obsidian";
 
 import { getValueSuggestions } from "ui/search/autocomplete-data";
 import {
@@ -7,14 +7,19 @@ import {
     applyValueCompletion,
 } from "utils/search-query";
 
-import type { App } from "obsidian";
+import type { App, SearchResult } from "obsidian";
 import type { SearchFilterField, SearchHintRow } from "utils/search-query";
 
 /** A single row in the tree search autocomplete dropdown. */
 type TreeSuggestRow =
     | { kind: "operator-header" }
     | { kind: "operator"; hint: SearchHintRow }
-    | { kind: "value"; field: SearchFilterField; value: string };
+    | {
+          kind: "value";
+          field: SearchFilterField;
+          value: string;
+          match?: SearchResult;
+      };
 
 /**
  * Obsidian-native autocomplete for the tree-view search box. Surfaces the
@@ -69,9 +74,10 @@ export class TreeSearchSuggest extends AbstractInputSuggest<TreeSuggestRow> {
                 { kind: "operator-header" },
                 ...analysis.hints
                     .filter((h) => h.insertToken !== undefined)
-                    .map(
-                        (hint): TreeSuggestRow => ({ kind: "operator", hint }),
-                    ),
+                    .map((hint): TreeSuggestRow => ({
+                        kind: "operator",
+                        hint,
+                    })),
             ];
         }
         if (analysis.mode === "value") {
@@ -79,10 +85,11 @@ export class TreeSearchSuggest extends AbstractInputSuggest<TreeSuggestRow> {
                 analysis.field,
                 analysis.partial,
             );
-            return values.map((value) => ({
+            return values.map((suggestion) => ({
                 kind: "value",
                 field: analysis.field,
-                value,
+                value: suggestion.value,
+                match: suggestion.match,
             }));
         }
         return [];
@@ -114,7 +121,12 @@ export class TreeSearchSuggest extends AbstractInputSuggest<TreeSuggestRow> {
                 text: row.hint.description,
             });
         } else {
-            title.createSpan({ text: row.value });
+            const valueEl = title.createSpan();
+            if (row.match) {
+                renderResults(valueEl, row.value, row.match);
+            } else {
+                valueEl.setText(row.value);
+            }
         }
 
         el.createDiv("suggestion-aux");

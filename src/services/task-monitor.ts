@@ -8,6 +8,7 @@ type TaskUpdateCallback = (tasks: ITaskInfo[]) => void;
 export class TaskMonitor {
     private tasks: Map<string, ITaskInfo> = new Map();
     private subscribers: Set<TaskUpdateCallback> = new Set();
+    private syncDataRevision = 0;
 
     /** Fires when an annotation is created/updated/deleted (from editor or reader). */
     public readonly annotationChanged = new EventBus<
@@ -38,7 +39,16 @@ export class TaskMonitor {
      * Called by ParentHost when a task updates in the worker
      */
     public onTaskUpdate(taskId: string, info: ITaskInfo) {
+        const previous = this.tasks.get(taskId);
         this.tasks.set(taskId, info);
+        if (
+            info.type === "sync" &&
+            info.status !== "pending" &&
+            info.status !== "running" &&
+            previous?.status !== info.status
+        ) {
+            this.syncDataRevision += 1;
+        }
         this.notifySubscribers();
 
         // Cleanup completed/failed tasks after delay (optional, handled by UI mostly)
@@ -48,6 +58,11 @@ export class TaskMonitor {
         return Array.from(this.tasks.values()).sort(
             (a, b) => b.createdTime - a.createdTime,
         );
+    }
+
+    /** Revision incremented whenever a sync reaches a terminal state. */
+    public getSyncDataRevision(): number {
+        return this.syncDataRevision;
     }
 
     public subscribe(callback: TaskUpdateCallback): () => void {

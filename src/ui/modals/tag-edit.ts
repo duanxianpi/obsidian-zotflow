@@ -1,7 +1,20 @@
-import { AbstractInputSuggest, Modal, setIcon, Setting } from "obsidian";
+import {
+    AbstractInputSuggest,
+    Modal,
+    prepareFuzzySearch,
+    renderResults,
+    setIcon,
+    Setting,
+    sortSearchResults,
+} from "obsidian";
 
-import type { App } from "obsidian";
+import type { App, SearchResult } from "obsidian";
 import type { TagInput } from "worker/services/tag";
+
+interface TagSuggestion {
+    name: string;
+    match?: SearchResult;
+}
 
 /** Options for {@link TagEditModal}. */
 export interface TagEditModalOptions {
@@ -20,7 +33,7 @@ export interface TagEditModalOptions {
  * names, excludes tags already on the item, and offers raw typed text as a
  * create-new option.
  */
-class TagInputSuggest extends AbstractInputSuggest<string> {
+class TagInputSuggest extends AbstractInputSuggest<TagSuggestion> {
     constructor(
         app: App,
         private readonly inputEl: HTMLInputElement,
@@ -31,45 +44,60 @@ class TagInputSuggest extends AbstractInputSuggest<string> {
         super(app, inputEl);
     }
 
-    getSuggestions(query: string): string[] {
-        const q = query.trim().toLowerCase();
+    getSuggestions(query: string): TagSuggestion[] {
+        const raw = query.trim();
         const existing = new Set(
             this.getExisting().map((t) => t.toLowerCase()),
         );
+        const candidates = this.getAllSuggestions().filter(
+            (name) => !existing.has(name.toLowerCase()),
+        );
 
-        const matches = this.getAllSuggestions()
-            .filter((name) => {
-                const lower = name.toLowerCase();
-                if (existing.has(lower)) return false;
-                return q === "" || lower.includes(q);
-            })
-            .sort((a, b) =>
-                a.localeCompare(b, undefined, {
-                    sensitivity: "accent",
-                }),
-            );
+        let matches: TagSuggestion[];
+        if (raw === "") {
+            matches = candidates
+                .sort((a, b) =>
+                    a.localeCompare(b, undefined, {
+                        sensitivity: "accent",
+                    }),
+                )
+                .map((name) => ({ name }));
+        } else {
+            const fuzzySearch = prepareFuzzySearch(raw);
+            const ranked: Array<{ name: string; match: SearchResult }> = [];
+            for (const name of candidates) {
+                const match = fuzzySearch(name);
+                if (match) ranked.push({ name, match });
+            }
+            sortSearchResults(ranked);
+            matches = ranked;
+        }
 
         // Offer a "create" entry when the typed text isn't an existing or
         // already-added tag.
-        const raw = query.trim();
         if (
             raw !== "" &&
             !existing.has(raw.toLowerCase()) &&
-            !matches.some((m) => m.toLowerCase() === raw.toLowerCase())
+            !matches.some((m) => m.name.toLowerCase() === raw.toLowerCase())
         ) {
-            matches.unshift(raw);
+            matches.unshift({ name: raw });
         }
 
         return matches;
     }
 
-    renderSuggestion(value: string, el: HTMLElement): void {
+    renderSuggestion(value: TagSuggestion, el: HTMLElement): void {
         el.addClass("zotflow-tag-suggestion");
-        el.setText(value);
+        const textEl = el.createSpan("zotflow-tag-suggestion-text");
+        if (value.match) {
+            renderResults(textEl, value.name, value.match);
+        } else {
+            textEl.setText(value.name);
+        }
     }
 
-    selectSuggestion(value: string): void {
-        this.onChoose(value);
+    selectSuggestion(value: TagSuggestion): void {
+        this.onChoose(value.name);
         this.inputEl.value = "";
         this.inputEl.focus();
         this.close();

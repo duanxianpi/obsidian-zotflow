@@ -1,4 +1,4 @@
-import { App, SuggestModal } from "obsidian";
+import { App, renderResults, SuggestModal } from "obsidian";
 import { workerBridge } from "bridge";
 import type { AnyIDBZoteroItem, IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
@@ -61,13 +61,12 @@ export abstract class BaseItemSearchModal extends SuggestModal<SuggestionItem> {
             if (values.length > 0) {
                 return [
                     { isHeader: true, label: analysis.field },
-                    ...values.map(
-                        (v): SuggestionItem => ({
-                            isValueCompletion: true,
-                            field: analysis.field,
-                            value: v,
-                        }),
-                    ),
+                    ...values.map((suggestion): SuggestionItem => ({
+                        isValueCompletion: true,
+                        field: analysis.field,
+                        value: suggestion.value,
+                        match: suggestion.match,
+                    })),
                 ];
             }
         }
@@ -77,7 +76,11 @@ export abstract class BaseItemSearchModal extends SuggestModal<SuggestionItem> {
     renderSuggestion(item: SuggestionItem, el: HTMLElement) {
         if ("isValueCompletion" in item) {
             el.addClass("zotflow-search-value");
-            el.setText(item.value);
+            if (item.match) {
+                renderResults(el, item.value, item.match);
+            } else {
+                el.setText(item.value);
+            }
             return;
         }
         this.suggest.renderSuggestion(item, el, this.inputEl.value);

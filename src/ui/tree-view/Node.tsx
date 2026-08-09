@@ -6,6 +6,7 @@ import { TreeSearchContext } from "./TreeView";
 import { ObsidianIcon } from "../ObsidianIcon";
 import { getAttachmentFileIcon, getItemTypeIcon } from "ui/icons";
 import { services } from "services/services";
+import { invalidateTagAutocompleteCache } from "ui/search/autocomplete-data";
 import { workerBridge } from "bridge";
 
 import {
@@ -534,6 +535,7 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
                                         node.data.key,
                                         tags,
                                     );
+                                    invalidateTagAutocompleteCache();
 
                                     // Refresh the tree so chip display updates.
                                     services.taskMonitor.treeChanged.emit();

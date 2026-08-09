@@ -4,6 +4,7 @@ import { workerBridge } from "bridge";
 import { IframeReaderBridge } from "./bridge";
 import { copyAnnotationOnCreate } from "./auto-copy";
 import { services } from "services/services";
+import { invalidateTagAutocompleteCache } from "ui/search/autocomplete-data";
 import { ViewStateService } from "services/view-state-service";
 import { openSourceNote } from "utils/viewer";
 import { TagEditModal } from "ui/modals/tag-edit";
@@ -831,6 +832,7 @@ export class ZoteroReaderView extends ItemView {
                         annotationKey,
                         tags,
                     );
+                    invalidateTagAutocompleteCache();
 
                     // Push updated tags back into the reader iframe.
                     await this.refreshAnnotationsFromDB();

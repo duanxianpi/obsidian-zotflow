@@ -1,6 +1,7 @@
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { parseSearchQuery, splitHighlight } from "utils/search-query";
+import type { SearchResult } from "obsidian";
 import type { AnyIDBZoteroItem } from "types/db-schema";
 import type { SearchFilterField } from "utils/search-query";
 
@@ -21,13 +22,11 @@ export interface SearchValueCompletion {
     isValueCompletion: true;
     field: SearchFilterField;
     value: string;
+    match?: SearchResult;
 }
 
 export type SuggestionItem =
-    | AnyIDBZoteroItem
-    | SearchHeader
-    | SearchEmptyState
-    | SearchValueCompletion;
+    AnyIDBZoteroItem | SearchHeader | SearchEmptyState | SearchValueCompletion;
 
 /**
  * Shared Zotero item search + rendering logic.
