@@ -42,6 +42,8 @@ import type { IframeReaderBridge } from "ui/reader/bridge";
 export interface ReaderBridgeState {
     /** The `methods` object the bridge handed penpal's `connect()`. */
     penpalMethods: null | { shakehand: () => Promise<void> };
+    /** Number of penpal connections explicitly destroyed by the bridge. */
+    penpalDestroys: number;
     settings: null | ZotFlowSettings;
     /** zotero-key -> note path, backing `indexService.getFileByKey`. */
     notesByKey: Map<string, string>;
@@ -65,6 +67,7 @@ export function resetReaderBridgeState(
     settings: ZotFlowSettings,
 ) {
     state.penpalMethods = null;
+    state.penpalDestroys = 0;
     state.settings = settings;
     state.notesByKey.clear();
     state.logs.length = 0;

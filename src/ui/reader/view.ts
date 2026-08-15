@@ -494,9 +494,16 @@ export class ZoteroReaderView extends ItemView {
     async onClose() {
         this.unsubscribeTaskMonitor?.();
         this.unsubscribeAnnotationChanged?.();
+        this.unsubscribeTaskMonitor = undefined;
+        this.unsubscribeAnnotationChanged = undefined;
         if (this.bridge) {
             await this.bridge.dispose();
+            this.bridge = undefined;
         }
+
+        this.fileBlobMD5 = undefined;
+        this.knownAnnotationIds.clear();
+        this.lastSyncTaskStatuses.clear();
 
         // Flush view state on close to ensure latest state is saved
         services.viewStateService.flushViewStateSave();

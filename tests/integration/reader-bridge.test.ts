@@ -41,6 +41,7 @@ import type {
 // matching `ReaderBridgeState`.
 const state = vi.hoisted(() => ({
     penpalMethods: null as null | { shakehand: () => Promise<void> },
+    penpalDestroys: 0,
     settings: null as never,
     notesByKey: new Map<string, string>(),
     logs: [] as Array<{ level: string; message: string }>,
@@ -59,7 +60,13 @@ vi.mock("penpal", () => ({
     },
     connect: (opts: { methods: { shakehand: () => Promise<void> } }) => {
         state.penpalMethods = opts.methods;
-        return { promise: Promise.resolve({}), destroy: () => {} };
+        return {
+            promise: Promise.resolve({}),
+            destroy: () => {
+                state.penpalDestroys++;
+                state.penpalMethods = null;
+            },
+        };
     },
 }));
 
@@ -846,11 +853,19 @@ describe("unexpected iframe reload", () => {
 });
 
 describe("lifecycle", () => {
-    it("tears the iframe down and lands on disposed", async () => {
+    it("destroys the child and penpal before removing the iframe", async () => {
         const h = harness();
         await h.completeHandshake();
+        h.child.destroy.mockImplementation(async () => {
+            expect(h.iframe.removed).toBe(false);
+            expect(state.penpalDestroys).toBe(0);
+            return true;
+        });
+
         await h.bridge.dispose();
 
+        expect(h.child.destroy).toHaveBeenCalledTimes(1);
+        expect(state.penpalDestroys).toBe(1);
         expect(h.iframe.removed).toBe(true);
         expect(h.bridge.state).toBe("disposed");
     });
@@ -860,7 +875,53 @@ describe("lifecycle", () => {
         await h.completeHandshake();
         await h.bridge.dispose();
         await expect(h.bridge.dispose()).resolves.toBeUndefined();
+        expect(h.child.destroy).toHaveBeenCalledTimes(1);
+        expect(state.penpalDestroys).toBe(1);
         expect(h.bridge.state).toBe("disposed");
+    });
+
+    it("drops the cached document buffer on final dispose", async () => {
+        const h = harness();
+        await h.completeHandshake();
+        await h.bridge.initReader(
+            makeReaderOptions({
+                data: { buf: new Uint8Array([1, 2, 3]), url: null },
+            }),
+        );
+
+        await h.bridge.dispose();
+
+        const internals = h.bridge as unknown as {
+            _readerOpts?: unknown;
+        };
+        expect(internals._readerOpts).toBeUndefined();
+    });
+
+    it("still removes the iframe when child cleanup fails", async () => {
+        const h = harness();
+        await h.completeHandshake();
+        h.child.destroy.mockRejectedValue(new Error("child failed"));
+
+        await expect(h.bridge.dispose()).resolves.toBeUndefined();
+
+        expect(state.penpalDestroys).toBe(1);
+        expect(h.iframe.removed).toBe(true);
+        expect(h.bridge.state).toBe("disposed");
+        expect(
+            state.logs.some((entry) =>
+                entry.message.includes("cleanup did not complete"),
+            ),
+        ).toBe(true);
+    });
+
+    it("releases a connection that is still waiting for child registration", async () => {
+        const h = harness();
+
+        await h.bridge.dispose();
+
+        await expect(h.connecting).resolves.toBeUndefined();
+        expect(state.penpalDestroys).toBe(1);
+        expect(h.iframe.removed).toBe(true);
     });
 
     it("re-initialises with freshly fetched annotations on reconnect", async () => {
@@ -873,6 +934,7 @@ describe("lifecycle", () => {
         state.remoteAnnotations.push({ id: "synced-1" });
 
         const reconnecting = h.bridge.reconnect();
+        await vi.waitFor(() => expect(h.iframes).toHaveLength(2));
         await h.register();
         await reconnecting;
 
@@ -896,6 +958,7 @@ describe("lifecycle", () => {
         await h.bridge.initReader(makeReaderOptions({ annotations: [] }));
 
         const reconnecting = h.bridge.reconnect();
+        await vi.waitFor(() => expect(h.iframes).toHaveLength(2));
         await h.register();
         await reconnecting;
 
@@ -912,10 +975,11 @@ describe("lifecycle", () => {
         h.bridge.onEventType("sidebarToggled", (e) => seen.push(e));
 
         const reconnecting = h.bridge.reconnect();
+        await vi.waitFor(() => expect(h.iframes).toHaveLength(2));
         const parentAfter = await h.register();
         await reconnecting;
 
-        // `reconnect()` disposes with clearListeners=false.
+        // The reconnect-only disconnect keeps the subscriptions.
         parentAfter.handleEvent({ type: "sidebarToggled", open: true });
         expect(seen).toHaveLength(1);
 

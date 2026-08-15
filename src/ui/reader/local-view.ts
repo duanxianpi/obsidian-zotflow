@@ -399,7 +399,12 @@ export class LocalReaderView extends ItemView {
 
         if (this.bridge) {
             await this.bridge.dispose();
+            this.bridge = undefined;
         }
+
+        this.dataManager = undefined;
+        this.file = null;
+        this.knownAnnotationIds.clear();
 
         // Flush view state on close to ensure latest state is saved
         services.viewStateService.flushViewStateSave();

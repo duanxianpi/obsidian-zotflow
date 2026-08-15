@@ -11,7 +11,7 @@ import type {
 import { EditorView } from "@codemirror/view";
 import { Component, MarkdownRenderer, Platform } from "obsidian";
 import { v4 as uuidv4 } from "uuid";
-import { connect, WindowMessenger } from "penpal";
+import { connect, WindowMessenger, type Connection } from "penpal";
 import { getBlobUrls } from "bundle-assets/inline-assets";
 import { services } from "services/services";
 import { workerBridge } from "bridge";
@@ -65,7 +65,13 @@ export class IframeReaderBridge {
         Set<(e: ChildEvents) => void>
     >();
     private connectTimeoutMs = 8000;
+    private childDestroyTimeoutMs = 3000;
     private readyPromiseResolver: (() => void) | null = null;
+    private connection: Connection | null = null;
+    private reconnectTimer: ReturnType<Window["setTimeout"]> | null = null;
+    private disconnectPromise: Promise<void> | null = null;
+    private permanentlyDisposed = false;
+    private readerInitPending = false;
 
     private editorList: EmbeddableMarkdownEditor[] = [];
     private rendererList: Component[] = [];
@@ -99,6 +105,27 @@ export class IframeReaderBridge {
         private localAttachment?: TFile,
         private localDataManager?: LocalDataManager,
     ) {}
+
+    private async waitWithTimeout<T>(
+        promise: Promise<T>,
+        timeoutMs: number,
+        message: string,
+    ): Promise<T> {
+        let timeout: ReturnType<Window["setTimeout"]> | null = null;
+        try {
+            return await Promise.race([
+                promise,
+                new Promise<never>((_, reject) => {
+                    timeout = window.setTimeout(
+                        () => reject(new Error(message)),
+                        timeoutMs,
+                    );
+                }),
+            ]);
+        } finally {
+            if (timeout !== null) window.clearTimeout(timeout);
+        }
+    }
 
     /**
      * Listen to specific event types from the child iframe with type safety
@@ -406,6 +433,7 @@ export class IframeReaderBridge {
     }
 
     async connect() {
+        if (this.permanentlyDisposed) return;
         if (this._state !== "idle" && this._state !== "disposed") return;
         this._state = "connecting";
 
@@ -413,8 +441,10 @@ export class IframeReaderBridge {
         /** True once `reconnect()` has started a newer attempt. */
         const superseded = () => generation !== this.connectGeneration;
 
+        let resolveReady: () => void = () => {};
         const readyPromise = new Promise<void>((resolve) => {
-            this.readyPromiseResolver = resolve;
+            resolveReady = resolve;
+            this.readyPromiseResolver = resolveReady;
         });
 
         // Create iframe. A fresh element per connect, so `iframeLoadCount`
@@ -502,7 +532,10 @@ export class IframeReaderBridge {
                     "IframeReaderBridge",
                 );
                 // Deferred so the reconnect never runs inside the load handler.
-                window.setTimeout(() => {
+                if (this.reconnectTimer !== null) return;
+                this.reconnectTimer = window.setTimeout(() => {
+                    this.reconnectTimer = null;
+                    if (superseded() || this.permanentlyDisposed) return;
                     void this.reconnect().catch((e: unknown) => {
                         services.logService.error(
                             "Reconnection after iframe reload failed",
@@ -568,30 +601,32 @@ export class IframeReaderBridge {
                 },
             },
         });
+        this.connection = conn;
 
-        // Wait for child to setup penpal connection
-        const remotePromise = conn.promise;
-        await Promise.race([
-            remotePromise,
-            new Promise<never>((_, rej) =>
-                window.setTimeout(
-                    () => rej(new Error("Child connect timeout")),
-                    this.connectTimeoutMs,
-                ),
-            ),
-        ]);
-        if (superseded()) return;
+        try {
+            // Wait for the child to set up its penpal connection.
+            await this.waitWithTimeout(
+                conn.promise,
+                this.connectTimeoutMs,
+                "Child connect timeout",
+            );
+            if (superseded()) return;
 
-        // Wait until the child calls register() (state becomes "ready") or timeout
-        await Promise.race([
-            readyPromise,
-            new Promise<never>((_, rej) =>
-                window.setTimeout(
-                    () => rej(new Error("Child connect timeout")),
-                    this.connectTimeoutMs,
-                ),
-            ),
-        ]);
+            // Then wait until the direct child API has registered.
+            await this.waitWithTimeout(
+                readyPromise,
+                this.connectTimeoutMs,
+                "Child connect timeout",
+            );
+        } catch (e) {
+            if (superseded()) return;
+            await this.disconnect();
+            throw e;
+        } finally {
+            if (this.readyPromiseResolver === resolveReady) {
+                this.readyPromiseResolver = null;
+            }
+        }
         // `dispose()` resolves the ready promise so a superseded connect unwinds
         // here immediately, instead of hanging until its timeout rejects.
         if (superseded()) return;
@@ -608,7 +643,11 @@ export class IframeReaderBridge {
         // Read through the getter: control-flow analysis still has `_state`
         // narrowed to the `"connecting"` assigned at the top of this method,
         // because the mutation happens inside the `register` callback.
-        if (this._readerOpts && this.state !== "reader-ready") {
+        if (
+            this._readerOpts &&
+            this.state !== "reader-ready" &&
+            !this.readerInitPending
+        ) {
             // Update annotation json
             let newAnnotationJson: AnnotationJSON[] = [];
 
@@ -678,14 +717,19 @@ export class IframeReaderBridge {
 
     initReader(opts: CreateReaderOptions) {
         this._readerOpts = opts;
+        this.readerInitPending = true;
         return this.runAfterBridgeReady(async () => {
-            await this.child!.initReader(opts);
-            this._state = "reader-ready";
+            try {
+                await this.child!.initReader(opts);
+                this._state = "reader-ready";
 
-            // Drain after reader ready queued calls
-            const tasks = [...this.afterReaderReadyQueue];
-            this.afterReaderReadyQueue.length = 0;
-            for (const t of tasks) await t();
+                // Drain after reader ready queued calls
+                const tasks = [...this.afterReaderReadyQueue];
+                this.afterReaderReadyQueue.length = 0;
+                for (const t of tasks) await t();
+            } finally {
+                this.readerInitPending = false;
+            }
         });
     }
 
@@ -713,41 +757,97 @@ export class IframeReaderBridge {
         });
     }
 
-    async dispose(clearListeners = true) {
-        if (this._state === "disposed") return;
-        this.editorList.forEach((editor) => editor.onunload());
-        this.editorList.length = 0;
-        this.rendererList.forEach((comp) => comp.unload());
-        this.rendererList.length = 0;
-        this._state = "disposing";
+    private disconnect(): Promise<void> {
+        if (this.disconnectPromise) return this.disconnectPromise;
 
-        // Release a `connect()` still waiting on the child to register. It
-        // checks its generation right after and unwinds without touching the
-        // torn-down child; leaving it parked would stall it until its own 8 s
-        // timeout rejected, long after a reconnect had taken over.
-        const releasePendingConnect = this.readyPromiseResolver;
-        this.readyPromiseResolver = null;
-        releasePendingConnect?.();
-
-        try {
-            if (this.iframe?.contentWindow) {
-                delete (this.iframe.contentWindow as BridgeChildWindow)
-                    .__OBSIDIAN_BRIDGE__;
+        this.disconnectPromise = (async () => {
+            if (
+                this._state === "disposed" &&
+                !this.iframe &&
+                !this.connection &&
+                !this.child
+            ) {
+                return;
             }
-        } catch {
-            // The iframe may already be cross-origin or torn down, which makes
-            // reaching into `contentWindow` throw. Nothing here needs it to
-            // succeed — the handle is being dropped either way.
-        }
-        this.child = undefined;
-        this.iframe?.remove();
-        this.iframe = null;
-        this.token = null;
-        // Nothing queued can run against a child that no longer exists.
-        this.afterBridgeReadyQueue.length = 0;
-        this.afterReaderReadyQueue.length = 0;
-        if (clearListeners) this.typedListeners.clear();
-        this._state = "disposed";
+
+            this._state = "disposing";
+            ++this.connectGeneration;
+
+            this.editorList.forEach((editor) => editor.onunload());
+            this.editorList.length = 0;
+            this.rendererList.forEach((comp) => comp.unload());
+            this.rendererList.length = 0;
+
+            if (this.reconnectTimer !== null) {
+                window.clearTimeout(this.reconnectTimer);
+                this.reconnectTimer = null;
+            }
+
+            const releasePendingConnect = this.readyPromiseResolver;
+            this.readyPromiseResolver = null;
+            releasePendingConnect?.();
+
+            const child = this.child;
+            const connection = this.connection;
+            const iframe = this.iframe;
+            if (iframe) iframe.onload = null;
+
+            try {
+                if (child) {
+                    await this.waitWithTimeout(
+                        child.destroy(),
+                        this.childDestroyTimeoutMs,
+                        "Reader child destroy timeout",
+                    );
+                }
+            } catch (e) {
+                services.logService.warn(
+                    "Reader child cleanup did not complete cleanly",
+                    "IframeReaderBridge",
+                    e,
+                );
+            } finally {
+                connection?.destroy();
+                if (this.connection === connection) this.connection = null;
+
+                try {
+                    if (iframe?.contentWindow) {
+                        delete (iframe.contentWindow as BridgeChildWindow)
+                            .__OBSIDIAN_BRIDGE__;
+                    }
+                } catch {
+                    // The browsing context may already have been replaced by
+                    // Obsidian reparenting. All local references are still
+                    // dropped below.
+                }
+
+                if (this.child === child) this.child = undefined;
+                iframe?.remove();
+                if (this.iframe === iframe) this.iframe = null;
+                this.token = null;
+                this.afterBridgeReadyQueue.length = 0;
+                this.afterReaderReadyQueue.length = 0;
+                this.readerInitPending = false;
+                this._state = "disposed";
+            }
+        })().finally(() => {
+            this.disconnectPromise = null;
+        });
+
+        return this.disconnectPromise;
+    }
+
+    async dispose() {
+        this.permanentlyDisposed = true;
+        await this.disconnect();
+
+        // Final close only. A reconnect deliberately keeps these so the new
+        // iframe can replay the document and retain the view's subscriptions.
+        this._readerOpts = undefined;
+        this.typedListeners.clear();
+        this.attachmentItem = undefined;
+        this.localAttachment = undefined;
+        this.localDataManager = undefined;
     }
 
     /**
@@ -759,11 +859,12 @@ export class IframeReaderBridge {
      * leave the first orphaned on a detached iframe.
      */
     reconnect(): Promise<void> {
+        if (this.permanentlyDisposed) return Promise.resolve();
         if (this.reconnectPromise) return this.reconnectPromise;
         this.reconnectPromise = (async () => {
             try {
-                await this.dispose(false);
-                await this.connect();
+                await this.disconnect();
+                if (!this.permanentlyDisposed) await this.connect();
             } finally {
                 this.reconnectPromise = null;
             }
