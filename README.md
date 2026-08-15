@@ -166,6 +166,18 @@ npm run dev:reader     # webpack watch mode (reader, separate terminal)
 npm run lint
 ```
 
+### Memory leak checks
+
+With Obsidian running, start the lightweight CDP monitor with:
+
+```bash
+npm run memory:watch -- --vault "Vault name"
+```
+
+Press Enter for a passive sample, use `g <label>` for a double-GC checkpoint,
+and `q` to detach the debugger and quit. Samples are written to
+`.memory-logs/` as CSV.
+
 ### Local install
 
 Copy `main.js`, `manifest.json`, and `styles.css` to:

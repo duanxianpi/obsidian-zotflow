@@ -24,6 +24,9 @@ data.json
 # esbuild
 meta.json
 
+# Local Obsidian memory monitor output
+.memory-logs/
+
 # CSL test fixtures (downloaded on first test run)
 tests/.csl-fixtures/
 

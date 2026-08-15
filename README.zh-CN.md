@@ -164,6 +164,17 @@ npm run dev:reader     # 阅读器 webpack watch（需单独终端）
 npm run lint
 ```
 
+### 内存泄露检查
+
+保持 Obsidian 运行，然后启动轻量 CDP 监控器：
+
+```bash
+npm run memory:watch -- --vault "仓库名称"
+```
+
+按 Enter 进行被动采样，输入 `g <标签>` 执行两次 GC 后采样，输入 `q`
+解除调试器并退出。采样结果会以 CSV 格式写入 `.memory-logs/`。
+
 ### 本地安装
 
 将 `main.js`、`manifest.json`、`styles.css` 复制到：
