@@ -55,3 +55,10 @@ export interface ITaskOptions {
     id?: string; // Optional custom ID
     signal?: AbortSignal;
 }
+
+/** Attachment bytes handed from the worker to a reader view. */
+export interface DownloadedAttachment {
+    blob: Blob;
+    /** Actual file-content MD5. Present only when the PDF reader needs it. */
+    contentMD5?: string;
+}

@@ -1,5 +1,4 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
-import SparkMD5 from "spark-md5";
 import { workerBridge } from "bridge";
 import { IframeReaderBridge } from "./bridge";
 import { copyAnnotationOnCreate } from "./auto-copy";
@@ -20,6 +19,8 @@ import type {
     ReaderNavigation,
 } from "types/zotero-reader";
 import type { ITaskInfo } from "types/tasks";
+import type { ReaderDocumentLease } from "services/reader-document-cache";
+import { getLibraryReaderDocumentKey } from "services/reader-document-cache";
 import {
     ZotFlowError,
     ZotFlowErrorCode,
@@ -47,9 +48,11 @@ export class ZoteroReaderView extends ItemView {
     private unsubscribeTaskMonitor?: () => void;
     private unsubscribeAnnotationChanged?: () => void;
     private lastSyncTaskStatuses = new Map<string, ITaskInfo["status"]>();
-    /** MD5 of the file blob used to init the reader, for extraction skip check. */
-    private fileBlobMD5?: string;
+    /** Actual MD5 of the PDF bytes used to initialise the reader. */
+    private fileContentMD5?: string;
     private knownAnnotationIds = new Set<string>();
+    private documentLease?: ReaderDocumentLease;
+    private closing = false;
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -196,6 +199,10 @@ export class ZoteroReaderView extends ItemView {
 
     private async renderReader() {
         const container = this.contentEl;
+        let acquiredLease: ReaderDocumentLease | undefined;
+        let leaseInstalled = false;
+        let readerInitialized = false;
+        const documentKey = getLibraryReaderDocumentKey(this.attachmentItem);
 
         // Resolve initial color scheme based on setting
         const schemeSetting = services.settings.readerColorScheme;
@@ -319,12 +326,16 @@ export class ZoteroReaderView extends ItemView {
                 }
             }
 
-            // Connect Bridge & Get File concurrently
-            const [, fileBlob] = await Promise.all([
-                this.bridge.connect(),
-                workerBridge
-                    .downloadAttachment(this.attachmentItem)
-                    .catch((e) => {
+            // Connect and acquire the shared document concurrently. Only the
+            // first Reader for this attachment version invokes the worker.
+            const leasePromise = services.readerDocumentCache.acquire(
+                documentKey,
+                async () => {
+                    try {
+                        return await workerBridge.downloadAttachment(
+                            this.attachmentItem,
+                        );
+                    } catch (e) {
                         services.logService.error(
                             "Failed to download attachment",
                             "ZoteroReaderView",
@@ -334,19 +345,29 @@ export class ZoteroReaderView extends ItemView {
                             "error",
                             "Failed to download attachment",
                         );
-                        return null;
-                    }),
-            ]);
+                        throw e;
+                    }
+                },
+            );
+            try {
+                const [, lease] = await Promise.all([
+                    this.bridge.connect(),
+                    leasePromise,
+                ]);
+                acquiredLease = lease;
+            } catch (e) {
+                // If bridge connection failed first, release the document when
+                // its in-flight load eventually settles.
+                void leasePromise
+                    .then((lease) => lease.release())
+                    .catch(() => undefined);
+                throw e;
+            }
 
-            if (!fileBlob) {
-                throw new ZotFlowError(
-                    ZotFlowErrorCode.RESOURCE_MISSING,
-                    "File not found or failed to download",
-                    "ZoteroReaderView",
-                    {
-                        attachmentItem: this.attachmentItem,
-                    },
-                );
+            if (this.closing) {
+                acquiredLease.release();
+                acquiredLease = undefined;
+                return;
             }
 
             // Get Annotations
@@ -358,107 +379,116 @@ export class ZoteroReaderView extends ItemView {
             this.knownAnnotationIds = new Set(
                 annotationJson.map((a: AnnotationJSON) => a.id),
             );
-            // Initialize Reader if ready
-            if (this.bridge.state === "bridge-ready") {
-                const savedViewState = services.viewStateService.getViewState(
-                    ViewStateService.remoteKey(
-                        this.attachmentItem.libraryID,
-                        this.attachmentItem.key,
-                    ),
-                );
 
-                const themeDefaults = {
-                    lightTheme: services.settings.defaultLightTheme,
-                    darkTheme: services.settings.defaultDarkTheme,
-                };
-
-                // User's saved theme takes top priority
-                const themeOverrides = {
-                    lightTheme:
-                        savedViewState?.lightTheme ?? themeDefaults.lightTheme,
-                    darkTheme:
-                        savedViewState?.darkTheme ?? themeDefaults.darkTheme,
-                };
-
-                const libID = this.attachmentItem.libraryID;
-                // Read-only when sync mode is read-only
-                const isReadOnly = services.libraryCache.isReadOnly(libID);
-
-                const autoDisable =
-                    services.settings.autoDisableNoteImageTextTools;
-                const opts: Partial<CreateReaderOptions> = {
-                    annotations: annotationJson,
-                    primaryViewState: savedViewState?.primaryViewState,
-                    colorScheme: this.colorScheme,
-                    customThemes: services.viewStateService.getCustomThemes(),
-                    autoDisableNoteTool: autoDisable,
-                    autoDisableTextTool: autoDisable,
-                    autoDisableImageTool: autoDisable,
-                    fontFamily: services.settings.epubFontFamily || undefined,
-                    ...themeOverrides,
-                    ...(isReadOnly ? { readOnly: true } : {}),
-                };
-
-                const contentType = this.attachmentItem.raw.data.contentType;
-                let type: "pdf" | "epub" | "snapshot" | "paperclip";
-                switch (contentType) {
-                    case "application/pdf":
-                        type = "pdf";
-                        break;
-                    case "application/epub+zip":
-                        type = "epub";
-                        break;
-                    case "text/html":
-                        type = "snapshot";
-                        break;
-                    default:
-                        services.logService.error(
-                            `Unknown content type: ${contentType}`,
-                            "ZoteroReaderView",
-                        );
-                        throw new ZotFlowError(
-                            ZotFlowErrorCode.UNKNOWN,
-                            `Unknown content type: ${contentType}`,
-                            "ZoteroReaderView",
-                            {
-                                attachmentItem: this.attachmentItem,
-                            },
-                        );
-                }
-
-                const authorName =
-                    this.attachmentItem.raw.library.type === "group"
-                        ? this.keyInfo.username || ""
-                        : "";
-
-                // Initialize Reader Logic
-                const fileBuf = await fileBlob.arrayBuffer();
-                this.fileBlobMD5 = SparkMD5.ArrayBuffer.hash(fileBuf);
-
-                ff(
-                    this.bridge.initReader({
-                        data: {
-                            buf: new Uint8Array(fileBuf),
-                            url: null,
-                        },
-                        type: type,
-                        authorName,
-                        ...opts,
-                    }),
-                    "Failed to initialise the reader",
-                );
-
-                // Subscribe to sync events for live annotation updates
-                this.subscribeToSyncEvents();
-                this.subscribeToAnnotationChanges();
-
-                // Extract external annotations
-                ff(
-                    this.extractExternalAnnotation(),
-                    "Failed to extract external annotations",
-                );
+            // Another overlapping render may already own the View's lease.
+            if (
+                this.bridge.state !== "bridge-ready" ||
+                this.documentLease
+            ) {
+                acquiredLease.release();
+                acquiredLease = undefined;
+                return;
             }
+
+            this.documentLease = acquiredLease;
+            acquiredLease = undefined;
+            leaseInstalled = true;
+
+            const savedViewState = services.viewStateService.getViewState(
+                ViewStateService.remoteKey(
+                    this.attachmentItem.libraryID,
+                    this.attachmentItem.key,
+                ),
+            );
+
+            const themeDefaults = {
+                lightTheme: services.settings.defaultLightTheme,
+                darkTheme: services.settings.defaultDarkTheme,
+            };
+
+            // User's saved theme takes top priority
+            const themeOverrides = {
+                lightTheme:
+                    savedViewState?.lightTheme ?? themeDefaults.lightTheme,
+                darkTheme:
+                    savedViewState?.darkTheme ?? themeDefaults.darkTheme,
+            };
+
+            const libID = this.attachmentItem.libraryID;
+            // Read-only when sync mode is read-only
+            const isReadOnly = services.libraryCache.isReadOnly(libID);
+
+            const autoDisable =
+                services.settings.autoDisableNoteImageTextTools;
+            const opts: Partial<CreateReaderOptions> = {
+                annotations: annotationJson,
+                primaryViewState: savedViewState?.primaryViewState,
+                colorScheme: this.colorScheme,
+                customThemes: services.viewStateService.getCustomThemes(),
+                autoDisableNoteTool: autoDisable,
+                autoDisableTextTool: autoDisable,
+                autoDisableImageTool: autoDisable,
+                fontFamily: services.settings.epubFontFamily || undefined,
+                ...themeOverrides,
+                ...(isReadOnly ? { readOnly: true } : {}),
+            };
+
+            const contentType = this.attachmentItem.raw.data.contentType;
+            let type: "pdf" | "epub" | "snapshot" | "paperclip";
+            switch (contentType) {
+                case "application/pdf":
+                    type = "pdf";
+                    break;
+                case "application/epub+zip":
+                    type = "epub";
+                    break;
+                case "text/html":
+                    type = "snapshot";
+                    break;
+                default:
+                    services.logService.error(
+                        `Unknown content type: ${contentType}`,
+                        "ZoteroReaderView",
+                    );
+                    throw new ZotFlowError(
+                        ZotFlowErrorCode.UNKNOWN,
+                        `Unknown content type: ${contentType}`,
+                        "ZoteroReaderView",
+                        {
+                            attachmentItem: this.attachmentItem,
+                        },
+                    );
+            }
+
+            const authorName =
+                this.attachmentItem.raw.library.type === "group"
+                    ? this.keyInfo.username || ""
+                    : "";
+
+            this.fileContentMD5 = this.documentLease.contentMD5;
+            await this.bridge.initReader({
+                data: { buf: null, url: this.documentLease.url },
+                type: type,
+                authorName,
+                ...opts,
+            });
+            readerInitialized = true;
+
+            // Subscribe to sync events for live annotation updates
+            this.subscribeToSyncEvents();
+            this.subscribeToAnnotationChanges();
+
+            // Extract external annotations
+            ff(
+                this.extractExternalAnnotation(),
+                "Failed to extract external annotations",
+            );
         } catch (e) {
+            acquiredLease?.release();
+            if (leaseInstalled && !readerInitialized) {
+                this.releaseDocumentLease();
+            }
+            if (this.closing) return;
             services.logService.error(
                 "Error loading Zotero Reader view",
                 "ZoteroReaderView",
@@ -492,21 +522,31 @@ export class ZoteroReaderView extends ItemView {
     }
 
     async onClose() {
+        this.closing = true;
         this.unsubscribeTaskMonitor?.();
         this.unsubscribeAnnotationChanged?.();
         this.unsubscribeTaskMonitor = undefined;
         this.unsubscribeAnnotationChanged = undefined;
-        if (this.bridge) {
-            await this.bridge.dispose();
+        try {
+            if (this.bridge) {
+                await this.bridge.dispose();
+            }
+        } finally {
             this.bridge = undefined;
+            this.releaseDocumentLease();
         }
 
-        this.fileBlobMD5 = undefined;
+        this.fileContentMD5 = undefined;
         this.knownAnnotationIds.clear();
         this.lastSyncTaskStatuses.clear();
 
         // Flush view state on close to ensure latest state is saved
         services.viewStateService.flushViewStateSave();
+    }
+
+    private releaseDocumentLease(): void {
+        this.documentLease?.release();
+        this.documentLease = undefined;
     }
 
     /**
@@ -663,7 +703,8 @@ export class ZoteroReaderView extends ItemView {
             this.attachmentItem.raw.data.contentType === "application/pdf";
         if (!isPDF) return;
 
-        const currentMD5 = this.attachmentItem.raw.data.md5 || this.fileBlobMD5;
+        const currentMD5 =
+            this.attachmentItem.raw.data.md5 || this.fileContentMD5;
         const lastExtractionMD5 =
             this.attachmentItem.externalAnnotationExtractionFileMD5;
 
@@ -682,7 +723,7 @@ export class ZoteroReaderView extends ItemView {
                 {
                     libraryID: this.attachmentItem.libraryID,
                     itemKey: this.attachmentItem.key,
-                    precomputedMD5: this.fileBlobMD5,
+                    precomputedMD5: this.fileContentMD5,
                 },
             ]);
 

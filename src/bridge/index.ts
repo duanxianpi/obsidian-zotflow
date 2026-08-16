@@ -35,6 +35,7 @@ import type {
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
 import type { AnnotationJSON } from "types/zotero-reader";
+import type { DownloadedAttachment } from "types/tasks";
 
 import type { App } from "obsidian";
 import type { AttachmentIdentifier } from "worker/tasks/impl/batch-extract-external-annotations-task";
@@ -276,7 +277,7 @@ export class WorkerBridge {
 
     async downloadAttachment(
         attachmentItem: IDBZoteroItem<AttachmentData>,
-    ): Promise<Blob> {
+    ): Promise<DownloadedAttachment> {
         this.assertInitialized();
         return this._api.downloadAttachment(attachmentItem);
     }

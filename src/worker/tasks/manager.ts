@@ -1,6 +1,6 @@
 import type { IParentProxy } from "bridge/types";
 import type { BaseTask } from "./base";
-import type { ITaskInfo } from "types/tasks";
+import type { DownloadedAttachment, ITaskInfo } from "types/tasks";
 import type { SyncService } from "worker/services/sync";
 import type {
     LibraryNoteService,
@@ -201,7 +201,7 @@ export class TaskManager {
     public async createDownloadAttachmentTask(
         attachmentService: AttachmentService,
         attachmentItem: IDBZoteroItem<AttachmentData>,
-    ): Promise<Blob> {
+    ): Promise<DownloadedAttachment> {
         const startedAt = Date.now();
         this.parentHost.log(
             "debug",
@@ -248,8 +248,8 @@ export class TaskManager {
             );
             await task.execute(controller.signal);
 
-            const blob = task.getBlob();
-            if (!blob) {
+            const result = task.takeResult();
+            if (!result) {
                 throw new Error(`Download failed for ${attachmentItem.key}`);
             }
             this.parentHost.log(
@@ -259,11 +259,11 @@ export class TaskManager {
                 {
                     taskId: task.id,
                     itemKey: attachmentItem.key,
-                    blobBytes: blob.size,
+                    blobBytes: result.blob.size,
                     elapsedMs: Date.now() - startedAt,
                 },
             );
-            return blob;
+            return result;
         } catch (e) {
             this.parentHost.log(
                 "debug",

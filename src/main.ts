@@ -465,6 +465,7 @@ export default class ZotFlow extends Plugin {
 
     onunload() {
         services.viewStateService.flushViewStateSave();
+        services.readerDocumentCache.dispose();
         workerBridge.terminate();
         revokeBlobUrls();
     }

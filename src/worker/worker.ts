@@ -35,6 +35,7 @@ import type {
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
 import type { AnnotationJSON } from "types/zotero-reader";
+import type { DownloadedAttachment } from "types/tasks";
 import type { DbHelperService as DbHelperServiceType } from "./services/db-helper";
 import type { TagService as TagServiceType } from "./services/tag";
 
@@ -92,7 +93,7 @@ export interface WorkerAPI {
     createBackfillCslJsonTask(): Promise<string>;
     downloadAttachment(
         attachmentItem: IDBZoteroItem<AttachmentData>,
-    ): Promise<Blob>;
+    ): Promise<DownloadedAttachment>;
     extractExternalAnnotations(
         items: ItemIdentifier[],
     ): Promise<AnnotationJSON[]>;

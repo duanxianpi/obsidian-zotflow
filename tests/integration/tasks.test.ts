@@ -11,6 +11,8 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { BaseTask } from "worker/tasks/base";
 import { TaskManager } from "worker/tasks/manager";
 import { SyncTask } from "worker/tasks/impl/sync-task";
+import { DownloadAttachmentTask } from "worker/tasks/impl/download-attachment-task";
+import SparkMD5 from "spark-md5";
 import { resetDb, seedItem, seedLibrary } from "../fakes/db";
 import { createFakeParentHost } from "../fakes/parent-host";
 import { DEFAULT_SETTINGS } from "settings/types";
@@ -78,12 +80,15 @@ const updatesFor = (taskId: string): ITaskInfo[] =>
     host.taskUpdates.filter((u) => u.taskId === taskId).map((u) => u.info);
 
 /** A minimal attachment row for the download-task factory. */
-const attachmentItem = () =>
+const attachmentItem = (contentType = "application/pdf", md5?: string) =>
     ({
         libraryID: LIB,
         key: "ATTACH01",
         itemType: "attachment",
-        raw: { key: "ATTACH01", data: { filename: "paper.pdf" } },
+        raw: {
+            key: "ATTACH01",
+            data: { contentType, filename: "paper.pdf", md5 },
+        },
     }) as never;
 
 describe("task lifecycle", () => {
@@ -982,8 +987,11 @@ describe("other task factories", () => {
         );
     });
 
-    test("a download hands back the blob the service produced", async () => {
+    test("a PDF download returns the blob and its streamed content MD5", async () => {
         const blob = new Blob(["pdf bytes"]);
+        const arrayBuffer = vi
+            .spyOn(blob, "arrayBuffer")
+            .mockRejectedValue(new Error("must not materialize the whole Blob"));
         const attachmentService = {
             getFileBlob: () => Promise.resolve(blob),
         } as never;
@@ -993,7 +1001,88 @@ describe("other task factories", () => {
             attachmentItem(),
         );
 
-        expect(result).toBe(blob);
+        const expectedMD5 = SparkMD5.ArrayBuffer.hash(
+            new TextEncoder().encode("pdf bytes").buffer,
+        );
+        expect(result).toEqual({ blob, contentMD5: expectedMD5 });
+        expect(arrayBuffer).not.toHaveBeenCalled();
+    });
+
+    test("EPUB and HTML downloads do not spend time hashing unused bytes", async () => {
+        for (const contentType of ["application/epub+zip", "text/html"]) {
+            const blob = new Blob([contentType]);
+            const stream = vi.spyOn(blob, "stream");
+            const attachmentService = {
+                getFileBlob: () => Promise.resolve(blob),
+            } as never;
+
+            const result = await manager.createDownloadAttachmentTask(
+                attachmentService,
+                attachmentItem(contentType),
+            );
+
+            expect(result).toEqual({ blob });
+            expect(stream).not.toHaveBeenCalled();
+        }
+    });
+
+    test("a PDF with server MD5 does not hash the Blob again", async () => {
+        const blob = new Blob(["pdf bytes"]);
+        const stream = vi.spyOn(blob, "stream");
+        const attachmentService = {
+            getFileBlob: () => Promise.resolve(blob),
+        } as never;
+
+        const result = await manager.createDownloadAttachmentTask(
+            attachmentService,
+            attachmentItem("application/pdf", "server-md5"),
+        );
+
+        expect(result).toEqual({ blob });
+        expect(stream).not.toHaveBeenCalled();
+    });
+
+    test("taking a download result clears the task's Blob reference", async () => {
+        const blob = new Blob(["epub bytes"]);
+        const task = new DownloadAttachmentTask(
+            host,
+            {
+                getFileBlob: () => Promise.resolve(blob),
+            } as never,
+            attachmentItem("application/epub+zip"),
+        );
+
+        await task.execute(new AbortController().signal);
+
+        expect(task.takeResult()).toEqual({ blob });
+        expect(task.takeResult()).toBeNull();
+    });
+
+    test("aborting during streamed hashing leaves no result", async () => {
+        const controller = new AbortController();
+        const blob = new Blob(["unused"]);
+        vi.spyOn(blob, "stream").mockReturnValue(
+            new ReadableStream<Uint8Array<ArrayBuffer>>({
+                start(streamController) {
+                    const chunk = new Uint8Array(new ArrayBuffer(3));
+                    chunk.set([1, 2, 3]);
+                    streamController.enqueue(chunk);
+                    controller.abort();
+                },
+            }),
+        );
+        const task = new DownloadAttachmentTask(
+            host,
+            {
+                getFileBlob: () => Promise.resolve(blob),
+            } as never,
+            attachmentItem(),
+        );
+
+        await task.execute(controller.signal);
+
+        expect(task.getInfo().status).toBe("cancelled");
+        expect(task.takeResult()).toBeNull();
     });
 
     test("a download that yields nothing is an error, not an empty blob", async () => {

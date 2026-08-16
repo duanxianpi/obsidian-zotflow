@@ -16,7 +16,12 @@ import type {
 } from "types/zotero-reader";
 import type { ViewStateResult } from "obsidian";
 import type { TagInput } from "worker/services/tag";
+import type { ReaderDocumentLease } from "services/reader-document-cache";
 import { services } from "services/services";
+import {
+    getLocalReaderDocumentFormat,
+    getLocalReaderDocumentKey,
+} from "services/reader-document-cache";
 import { errorMessage as describeError } from "utils/error";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 
@@ -39,6 +44,8 @@ export class LocalReaderView extends ItemView {
     private dataManager?: LocalDataManager;
     private knownAnnotationIds = new Set<string>();
     private unsubscribeLocalAnnotationChanged?: () => void;
+    private documentLease?: ReaderDocumentLease;
+    private closing = false;
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -151,6 +158,11 @@ export class LocalReaderView extends ItemView {
 
     private async renderReader(file: TFile) {
         const container = this.contentEl;
+        let acquiredLease: ReaderDocumentLease | undefined;
+        let leaseInstalled = false;
+        let readerInitialized = false;
+        const format = getLocalReaderDocumentFormat(file.extension);
+        const documentKey = getLocalReaderDocumentKey(file);
 
         // Resolve initial color scheme based on setting
         const schemeSetting = services.settings.readerColorScheme;
@@ -268,22 +280,54 @@ export class LocalReaderView extends ItemView {
                 );
             }
 
-            // Connect Bridge & Get File concurrently
-            const [, buffer, loadedAnnotations] = await Promise.all([
-                this.bridge.connect(),
-                this.app.vault.readBinary(file),
-                (async () => {
-                    return await this.dataManager?.loadAnnotations();
-                })(),
-            ]);
-
-            // Seed known-annotation set so the initial load isn't auto-copied.
-            this.knownAnnotationIds = new Set(
-                (loadedAnnotations ?? []).map((a: AnnotationJSON) => a.id),
+            // Connect, load annotations, and acquire the shared document in
+            // parallel. The cache de-duplicates concurrent reads of this file.
+            const leasePromise = services.readerDocumentCache.acquire(
+                documentKey,
+                async () => {
+                    const buffer = await this.app.vault.readBinary(file);
+                    return {
+                        blob: new Blob([buffer], { type: format.mimeType }),
+                    };
+                },
             );
+            try {
+                const [, lease, loadedAnnotations] = await Promise.all([
+                    this.bridge.connect(),
+                    leasePromise,
+                    (async () => {
+                        return await this.dataManager?.loadAnnotations();
+                    })(),
+                ]);
+                acquiredLease = lease;
 
-            // Initialize Reader if ready
-            if (this.bridge.state === "bridge-ready") {
+                if (this.closing) {
+                    acquiredLease.release();
+                    acquiredLease = undefined;
+                    return;
+                }
+
+                // Seed known-annotation set so the initial load isn't auto-copied.
+                this.knownAnnotationIds = new Set(
+                    (loadedAnnotations ?? []).map(
+                        (a: AnnotationJSON) => a.id,
+                    ),
+                );
+
+                // Another overlapping render may already own the View's lease.
+                if (
+                    this.bridge.state !== "bridge-ready" ||
+                    this.documentLease
+                ) {
+                    acquiredLease.release();
+                    acquiredLease = undefined;
+                    return;
+                }
+
+                this.documentLease = acquiredLease;
+                acquiredLease = undefined;
+                leaseInstalled = true;
+
                 // Read persisted view state (including saved themes)
                 const viewState = services.viewStateService.getViewState(
                     file.path,
@@ -298,7 +342,8 @@ export class LocalReaderView extends ItemView {
                 const themeOverrides = {
                     lightTheme:
                         viewState?.lightTheme ?? themeDefaults.lightTheme,
-                    darkTheme: viewState?.darkTheme ?? themeDefaults.darkTheme,
+                    darkTheme:
+                        viewState?.darkTheme ?? themeDefaults.darkTheme,
                 };
 
                 const autoDisable =
@@ -316,23 +361,27 @@ export class LocalReaderView extends ItemView {
                     ...themeOverrides,
                 };
 
-                const type = this.getReaderType(file.extension);
-
-                // Initialize Reader Logic
-                ff(
-                    this.bridge.initReader({
-                        data: {
-                            buf: new Uint8Array(buffer),
-                            url: null,
-                        },
-                        type: type,
-                        authorName: "",
-                        ...opts,
-                    }),
-                    "Failed to initialise the reader",
-                );
+                await this.bridge.initReader({
+                    data: { buf: null, url: this.documentLease.url },
+                    type: format.readerType,
+                    authorName: "",
+                    ...opts,
+                });
+                readerInitialized = true;
+            } catch (e) {
+                // If another Promise rejected first, release the lease when its
+                // in-flight load eventually settles.
+                void leasePromise
+                    .then((lease) => lease.release())
+                    .catch(() => undefined);
+                throw e;
             }
         } catch (e) {
+            acquiredLease?.release();
+            if (leaseInstalled && !readerInitialized) {
+                this.releaseDocumentLease();
+            }
+            if (this.closing) return;
             services.logService.error(
                 "Error loading Zotero Reader view",
                 "LocalReaderView",
@@ -349,18 +398,6 @@ export class LocalReaderView extends ItemView {
         }
     }
 
-    private getReaderType(extension: string) {
-        switch (extension.toLowerCase()) {
-            case "pdf":
-                return "pdf";
-            case "epub":
-                return "epub";
-            case "html":
-                return "snapshot";
-            default:
-                return "pdf";
-        }
-    }
     // Handle navigation info
     setEphemeralState(state: unknown): void {
         const subpath = (state as { subpath?: unknown } | null)?.subpath;
@@ -394,12 +431,17 @@ export class LocalReaderView extends ItemView {
     }
 
     async onClose() {
+        this.closing = true;
         this.unsubscribeLocalAnnotationChanged?.();
         this.unsubscribeLocalAnnotationChanged = undefined;
 
-        if (this.bridge) {
-            await this.bridge.dispose();
+        try {
+            if (this.bridge) {
+                await this.bridge.dispose();
+            }
+        } finally {
             this.bridge = undefined;
+            this.releaseDocumentLease();
         }
 
         this.dataManager = undefined;
@@ -408,6 +450,11 @@ export class LocalReaderView extends ItemView {
 
         // Flush view state on close to ensure latest state is saved
         services.viewStateService.flushViewStateSave();
+    }
+
+    private releaseDocumentLease(): void {
+        this.documentLease?.release();
+        this.documentLease = undefined;
     }
 
     /**

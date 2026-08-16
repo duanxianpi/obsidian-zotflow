@@ -5,6 +5,7 @@ import { ViewStateService } from "./view-state-service";
 import { TaskMonitor } from "./task-monitor";
 import { CitationService } from "./citation-service";
 import { LibraryCache } from "./library-cache";
+import { ReaderDocumentCache } from "./reader-document-cache";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
 import type { App } from "obsidian";
@@ -24,6 +25,7 @@ class ServiceLocator {
     private _taskMonitor: TaskMonitor;
     private _citationService: CitationService;
     private _libraryCache: LibraryCache;
+    private _readerDocumentCache: ReaderDocumentCache;
 
     initialize(plugin: ZotFlow, settings: ZotFlowSettings) {
         this._plugin = plugin;
@@ -46,6 +48,7 @@ class ServiceLocator {
             () => this._settings,
             this._logService,
         );
+        this._readerDocumentCache = new ReaderDocumentCache();
 
         this._initialized = true;
         this._logService.info("Services initialized.", "LocalServiceLocator");
@@ -122,6 +125,11 @@ class ServiceLocator {
     get libraryCache() {
         this.assertInitialized();
         return this._libraryCache;
+    }
+
+    get readerDocumentCache() {
+        this.assertInitialized();
+        return this._readerDocumentCache;
     }
 }
 

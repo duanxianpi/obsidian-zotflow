@@ -720,6 +720,10 @@ describe("unexpected iframe reload", () => {
             ),
         ).toBe(true);
         expect(h.child.initReader).toHaveBeenCalledTimes(2);
+        expect(h.child.initReader.mock.calls[1]![0].data).toEqual({
+            buf: null,
+            url: "blob:doc",
+        });
     });
 
     it("recovers a reload that lands before the first initReader", async () => {
