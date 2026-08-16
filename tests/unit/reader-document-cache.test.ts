@@ -65,6 +65,32 @@ describe("reader document metadata", () => {
         expect(key("same-md5", 1)).toBe(key("same-md5", 2));
         expect(key(undefined, 1)).not.toBe(key(undefined, 2));
     });
+
+    test("external library keys follow path and filesystem revision", () => {
+        const item = {
+            libraryID: 7,
+            key: "ATTACH01",
+            version: 1,
+            raw: { data: { md5: "stale-server-md5" } },
+        } as never;
+        const key = (path: string, mtime: number, size: number) =>
+            getLibraryReaderDocumentKey(item, {
+                kind: "external",
+                path,
+                mtime,
+                size,
+            });
+
+        expect(key("C:/zotero/a.pdf", 10, 20)).toBe(
+            key("C:/zotero/a.pdf", 10, 20),
+        );
+        expect(key("C:/zotero/a.pdf", 10, 20)).not.toBe(
+            key("C:/zotero/a.pdf", 11, 20),
+        );
+        expect(key("C:/zotero/a.pdf", 10, 20)).not.toBe(
+            key("C:/zotero/b.pdf", 10, 20),
+        );
+    });
 });
 
 describe("ReaderDocumentCache", () => {
@@ -122,6 +148,28 @@ describe("ReaderDocumentCache", () => {
         const lease = await cache.acquire("same", load);
         expect(load).toHaveBeenCalledTimes(2);
         lease.release();
+    });
+
+    test("does not share a volatile source with the same logical key", async () => {
+        const { create, revoke } = mockObjectUrls("blob:first", "blob:second");
+        const load = vi
+            .fn()
+            .mockResolvedValue({ blob: new Blob(["volatile"]) });
+        const cache = new ReaderDocumentCache();
+
+        const [first, second] = await Promise.all([
+            cache.acquire("same", load, { reuse: false }),
+            cache.acquire("same", load, { reuse: false }),
+        ]);
+
+        expect(load).toHaveBeenCalledTimes(2);
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(first.url).toBe("blob:first");
+        expect(second.url).toBe("blob:second");
+
+        first.release();
+        second.release();
+        expect(revoke).toHaveBeenCalledTimes(2);
     });
 
     test("dispose revokes ready entries and rejects future acquires", async () => {

@@ -65,6 +65,83 @@ describe("metadata guards", () => {
 });
 
 /* ================================================================ */
+/*  Reader document revisions                                      */
+/* ================================================================ */
+
+describe("reader document revisions", () => {
+    it("uses filesystem metadata for a linked file", async () => {
+        const item = await h.seedAttachment("LINKED01", {
+            linkMode: "linked_file",
+            path: "/papers/current.pdf",
+        });
+        const statExternalFile = vi.fn(async () => ({
+            mtime: 1234,
+            size: 5678,
+        }));
+        h.host.statExternalFile = statExternalFile;
+
+        await expect(h.service.getReaderDocumentRevision(item)).resolves.toEqual(
+            {
+                kind: "external",
+                path: "/papers/current.pdf",
+                mtime: 1234,
+                size: 5678,
+            },
+        );
+        expect(statExternalFile).toHaveBeenCalledWith("/papers/current.pdf");
+    });
+
+    it("uses filesystem metadata in Zotero local storage mode", async () => {
+        h = await createAttachmentHarness({
+            settings: {
+                useZoteroStorage: true,
+                zoteroStoragePath: "/zotero/storage",
+            },
+        });
+        const item = await h.seedAttachment("ATTACH01");
+        h.host.statExternalFile = async () => ({ mtime: 10, size: 20 });
+
+        await expect(h.service.getReaderDocumentRevision(item)).resolves.toEqual(
+            {
+                kind: "external",
+                path: "/zotero/storage/ATTACH01/ATTACH01.pdf",
+                mtime: 10,
+                size: 20,
+            },
+        );
+    });
+
+    it("keeps remote attachments on their library revision", async () => {
+        const item = await h.seedAttachment("ATTACH01");
+
+        await expect(h.service.getReaderDocumentRevision(item)).resolves.toEqual(
+            { kind: "library" },
+        );
+    });
+
+    it("disables sharing when external metadata cannot be read", async () => {
+        const item = await h.seedAttachment("LINKED01", {
+            linkMode: "linked_file",
+            path: "/papers/current.pdf",
+        });
+        h.host.statExternalFile = async () => {
+            throw new Error("stat failed");
+        };
+
+        await expect(h.service.getReaderDocumentRevision(item)).resolves.toEqual(
+            { kind: "volatile" },
+        );
+        expect(
+            h.host.logs.some(
+                (entry) =>
+                    entry.level === "warn" &&
+                    entry.message.includes("sharing disabled"),
+            ),
+        ).toBe(true);
+    });
+});
+
+/* ================================================================ */
 /*  Cache decisions                                                 */
 /* ================================================================ */
 

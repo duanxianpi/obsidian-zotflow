@@ -1008,6 +1008,29 @@ describe("other task factories", () => {
         expect(arrayBuffer).not.toHaveBeenCalled();
     });
 
+    test("a PDF download falls back to arrayBuffer without Blob.stream", async () => {
+        const blob = new Blob(["legacy pdf bytes"]);
+        Object.defineProperty(blob, "stream", {
+            configurable: true,
+            value: undefined,
+        });
+        const arrayBuffer = vi.spyOn(blob, "arrayBuffer");
+        const attachmentService = {
+            getFileBlob: () => Promise.resolve(blob),
+        } as never;
+
+        const result = await manager.createDownloadAttachmentTask(
+            attachmentService,
+            attachmentItem(),
+        );
+
+        const expectedMD5 = SparkMD5.ArrayBuffer.hash(
+            new TextEncoder().encode("legacy pdf bytes").buffer,
+        );
+        expect(result).toEqual({ blob, contentMD5: expectedMD5 });
+        expect(arrayBuffer).toHaveBeenCalledTimes(1);
+    });
+
     test("EPUB and HTML downloads do not spend time hashing unused bytes", async () => {
         for (const contentType of ["application/epub+zip", "text/html"]) {
             const blob = new Blob([contentType]);

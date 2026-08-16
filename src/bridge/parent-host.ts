@@ -17,7 +17,7 @@ import {
     deleteFile,
     getLinkedLocalSourceNote,
 } from "utils/file";
-import type { VaultConfig } from "bridge/types";
+import type { ExternalFileStat, VaultConfig } from "bridge/types";
 import { services } from "services/services";
 import { errorMessage as describeError } from "utils/error";
 
@@ -157,6 +157,33 @@ export class ParentHost implements IParentProxy {
         } catch (e) {
             throw new Error(
                 `Failed to read external file: ${describeError(e)}`,
+            );
+        }
+    }
+
+    public async statExternalFile(
+        absolutePath: string,
+    ): Promise<ExternalFileStat> {
+        if (!Platform.isDesktop) {
+            throw new Error(
+                `Cannot stat a file outside the vault on mobile: ${absolutePath}`,
+            );
+        }
+        if (!Platform.isDesktopApp) {
+            throw new Error("External files require the Obsidian desktop app");
+        }
+        try {
+            // Same CommonJS constraint as `readExternalBinaryFile`.
+            // eslint-disable-next-line @typescript-eslint/no-require-imports -- see readExternalBinaryFile
+            const { promises: fs } = require("fs") as typeof import("fs");
+            const stat = await fs.stat(absolutePath);
+            if (!stat.isFile()) {
+                throw new Error("Path does not identify a file");
+            }
+            return { mtime: stat.mtimeMs, size: stat.size };
+        } catch (e) {
+            throw new Error(
+                `Failed to stat external file: ${describeError(e)}`,
             );
         }
     }

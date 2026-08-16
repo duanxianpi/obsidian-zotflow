@@ -11,6 +11,7 @@ import type { ZotFlowSettings } from "settings/types";
 import type { AttachmentData } from "types/zotero-item";
 import type { IParentProxy } from "bridge/types";
 import type { IDBZoteroFile, IDBZoteroItem } from "types/db-schema";
+import type { ReaderDocumentRevision } from "types/tasks";
 
 /**
  * Attachment management service for ZotFlow (Worker Side).
@@ -65,6 +66,85 @@ export class AttachmentService {
             AttachmentService.ATTACHMENTS_PREFIX.length,
         );
         return this.parentHost.joinPath(baseDir, relativePath);
+    }
+
+    /** Resolve the physical source whose metadata governs Reader reuse. */
+    private async resolveReaderExternalFilePath(
+        item: IDBZoteroItem<AttachmentData>,
+    ): Promise<string | null> {
+        const linkMode = item.raw.data.linkMode;
+        if (linkMode === "linked_file") {
+            const rawPath = item.raw.data.path;
+            if (!rawPath) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.RESOURCE_MISSING,
+                    "AttachmentService",
+                    `No path for linked_file ${item.key}`,
+                );
+            }
+            return this.resolveLinkedFilePath(rawPath);
+        }
+
+        if (
+            this.settings.useZoteroStorage &&
+            (linkMode === "imported_file" || linkMode === "imported_url") &&
+            (await this.parentHost.isDesktopApp())
+        ) {
+            const storagePath = this.settings.zoteroStoragePath.trim();
+            if (!storagePath) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.CONFIG_MISSING,
+                    "AttachmentService",
+                    "Zotero storage path is not configured",
+                );
+            }
+            return this.resolveLocalStorageFilePath(item, storagePath);
+        }
+
+        return null;
+    }
+
+    /**
+     * Identify the concrete bytes a new Reader would load. Mutable disk files
+     * use filesystem metadata; if it cannot be read, callers must not reuse an
+     * existing Blob merely because the Zotero item version stayed unchanged.
+     */
+    async getReaderDocumentRevision(
+        attachmentItem: IDBZoteroItem<AttachmentData>,
+    ): Promise<ReaderDocumentRevision> {
+        const item = await db.items.get([
+            attachmentItem.libraryID,
+            attachmentItem.key,
+        ]);
+        if (!item || item.itemType !== "attachment") {
+            throw new ZotFlowError(
+                ZotFlowErrorCode.RESOURCE_MISSING,
+                "AttachmentService",
+                `Item metadata not found for ${attachmentItem.key}`,
+            );
+        }
+
+        let filePath: string | null;
+        try {
+            filePath = await this.resolveReaderExternalFilePath(item);
+            if (!filePath) return { kind: "library" };
+
+            const stat = await this.parentHost.statExternalFile(filePath);
+            return {
+                kind: "external",
+                path: filePath,
+                mtime: stat.mtime,
+                size: stat.size,
+            };
+        } catch (e) {
+            this.parentHost.log(
+                "warn",
+                "External attachment metadata unavailable; Reader sharing disabled.",
+                "AttachmentService",
+                e,
+            );
+            return { kind: "volatile" };
+        }
     }
 
     /**
@@ -933,17 +1013,12 @@ export class AttachmentService {
             );
         }
 
-        const filename = this.requireStoragePathSegment(
-            item.raw.data.filename,
-            "attachment filename",
-        );
         const itemKey = this.requireStoragePathSegment(item.key, "item key");
         let filePath: string | undefined;
         try {
-            filePath = await this.parentHost.joinPath(
+            filePath = await this.resolveLocalStorageFilePath(
+                item,
                 storagePath,
-                itemKey,
-                filename,
             );
             this.parentHost.log(
                 "info",
@@ -978,6 +1053,18 @@ export class AttachmentService {
                 { itemKey, filePath, storagePath },
             );
         }
+    }
+
+    private async resolveLocalStorageFilePath(
+        item: IDBZoteroItem<AttachmentData>,
+        storagePath: string,
+    ): Promise<string> {
+        const filename = this.requireStoragePathSegment(
+            item.raw.data.filename,
+            "attachment filename",
+        );
+        const itemKey = this.requireStoragePathSegment(item.key, "item key");
+        return this.parentHost.joinPath(storagePath, itemKey, filename);
     }
 
     private requireStoragePathSegment(

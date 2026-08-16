@@ -161,21 +161,22 @@ export class LocalReaderView extends ItemView {
         let acquiredLease: ReaderDocumentLease | undefined;
         let leaseInstalled = false;
         let readerInitialized = false;
-        const format = getLocalReaderDocumentFormat(file.extension);
-        const documentKey = getLocalReaderDocumentKey(file);
-
-        // Resolve initial color scheme based on setting
-        const schemeSetting = services.settings.readerColorScheme;
-        if (schemeSetting === "light") {
-            this.colorScheme = "light";
-        } else if (schemeSetting === "dark") {
-            this.colorScheme = "dark";
-        } else {
-            this.colorScheme = getComputedStyle(document.body)
-                .colorScheme as ColorScheme;
-        }
 
         try {
+            const format = getLocalReaderDocumentFormat(file.extension);
+            const documentKey = getLocalReaderDocumentKey(file);
+
+            // Resolve initial color scheme based on setting
+            const schemeSetting = services.settings.readerColorScheme;
+            if (schemeSetting === "light") {
+                this.colorScheme = "light";
+            } else if (schemeSetting === "dark") {
+                this.colorScheme = "dark";
+            } else {
+                this.colorScheme = getComputedStyle(document.body)
+                    .colorScheme as ColorScheme;
+            }
+
             // Create bridge once
             if (!this.bridge) {
                 // Initialize data manager

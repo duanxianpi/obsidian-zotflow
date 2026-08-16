@@ -109,6 +109,13 @@ export class DownloadAttachmentTask extends BaseTask {
 
     /** Hash a PDF incrementally so no second full-size ArrayBuffer is created. */
     private async hashBlob(blob: Blob, signal: AbortSignal): Promise<string> {
+        if (typeof blob.stream !== "function") {
+            if (signal.aborted) throw new Error("Aborted");
+            const buffer = await blob.arrayBuffer();
+            if (signal.aborted) throw new Error("Aborted");
+            return SparkMD5.ArrayBuffer.hash(buffer);
+        }
+
         const streamReader = blob.stream().getReader();
         const hasher = new SparkMD5.ArrayBuffer();
 

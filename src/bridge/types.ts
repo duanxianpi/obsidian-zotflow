@@ -12,6 +12,12 @@ export interface IRequestResponse {
     arrayBuffer: ArrayBuffer;
 }
 
+/** Metadata used to identify one snapshot of an external OS file. */
+export interface ExternalFileStat {
+    mtime: number;
+    size: number;
+}
+
 /** Contract for all operations the worker can invoke on the main thread. */
 /** The subset of Obsidian's undocumented vault config ZotFlow reads. */
 export interface VaultConfig {
@@ -43,6 +49,7 @@ export interface IParentProxy {
     }>;
     deleteFile(path: string): Promise<void>;
     readExternalBinaryFile(absolutePath: string): Promise<ArrayBuffer>;
+    statExternalFile(absolutePath: string): Promise<ExternalFileStat>;
     openFile(path: string, newLeaf: boolean): Promise<void>;
 
     // Index

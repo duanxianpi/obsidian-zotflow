@@ -1,6 +1,7 @@
 import type { TFile } from "obsidian";
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
+import type { ReaderDocumentRevision } from "types/tasks";
 
 export type ReaderDocumentType = "pdf" | "epub" | "snapshot";
 
@@ -41,7 +42,19 @@ export function getLocalReaderDocumentKey(file: TFile): string {
 /** Cache identity for one version of a Zotero attachment. */
 export function getLibraryReaderDocumentKey(
     item: IDBZoteroItem<AttachmentData>,
+    revision?: Extract<ReaderDocumentRevision, { kind: "external" }>,
 ): string {
+    if (revision) {
+        return JSON.stringify([
+            "library-file",
+            item.libraryID,
+            item.key,
+            revision.path,
+            revision.mtime,
+            revision.size,
+        ]);
+    }
+
     const contentVersion = item.raw.data.md5
         ? `md5:${item.raw.data.md5}`
         : `version:${item.version}`;
@@ -75,20 +88,27 @@ interface CacheEntry {
     promise: Promise<ReadyDocument>;
 }
 
+export interface ReaderDocumentAcquireOptions {
+    /** Set false for mutable sources whose current revision is unavailable. */
+    reuse?: boolean;
+}
+
 /** Shares immutable attachment bytes while at least one Reader references them. */
 export class ReaderDocumentCache {
-    private readonly entries = new Map<string, CacheEntry>();
+    private readonly entries = new Map<string | symbol, CacheEntry>();
     private disposed = false;
 
     async acquire(
         key: string,
         load: () => Promise<ReaderDocumentSource>,
+        options: ReaderDocumentAcquireOptions = {},
     ): Promise<ReaderDocumentLease> {
         if (this.disposed) {
             throw new Error("Reader document cache is disposed");
         }
 
-        let entry = this.entries.get(key);
+        const entryKey = options.reuse === false ? Symbol(key) : key;
+        let entry = this.entries.get(entryKey);
         if (!entry) {
             const newEntry: CacheEntry = {
                 refs: 0,
@@ -105,7 +125,7 @@ export class ReaderDocumentCache {
 
                         if (
                             this.disposed ||
-                            this.entries.get(key) !== newEntry
+                            this.entries.get(entryKey) !== newEntry
                         ) {
                             URL.revokeObjectURL(ready.url);
                             throw new Error(
@@ -117,7 +137,7 @@ export class ReaderDocumentCache {
                     }),
             };
             entry = newEntry;
-            this.entries.set(key, entry);
+            this.entries.set(entryKey, entry);
         }
 
         entry.refs++;
@@ -125,11 +145,11 @@ export class ReaderDocumentCache {
         try {
             ready = await entry.promise;
         } catch (e) {
-            this.releaseEntry(key, entry);
+            this.releaseEntry(entryKey, entry);
             throw e;
         }
-        if (this.disposed || this.entries.get(key) !== entry) {
-            this.releaseEntry(key, entry);
+        if (this.disposed || this.entries.get(entryKey) !== entry) {
+            this.releaseEntry(entryKey, entry);
             throw new Error("Reader document cache was disposed while loading");
         }
 
@@ -140,7 +160,7 @@ export class ReaderDocumentCache {
             release: () => {
                 if (released) return;
                 released = true;
-                this.releaseEntry(key, entry);
+                this.releaseEntry(entryKey, entry);
             },
         };
     }
@@ -156,7 +176,7 @@ export class ReaderDocumentCache {
         this.entries.clear();
     }
 
-    private releaseEntry(key: string, entry: CacheEntry): void {
+    private releaseEntry(key: string | symbol, entry: CacheEntry): void {
         if (entry.refs > 0) entry.refs--;
         if (entry.refs !== 0 || this.entries.get(key) !== entry) return;
 

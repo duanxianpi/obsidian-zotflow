@@ -229,6 +229,7 @@ export function createFakeParentHost(
             binaryVault.delete(path);
         },
         readExternalBinaryFile: async () => unsupported("readExternalBinaryFile"),
+        statExternalFile: async () => unsupported("statExternalFile"),
         openFile: async (path) => {
             opened.push(path);
         },

@@ -202,7 +202,6 @@ export class ZoteroReaderView extends ItemView {
         let acquiredLease: ReaderDocumentLease | undefined;
         let leaseInstalled = false;
         let readerInitialized = false;
-        const documentKey = getLibraryReaderDocumentKey(this.attachmentItem);
 
         // Resolve initial color scheme based on setting
         const schemeSetting = services.settings.readerColorScheme;
@@ -216,6 +215,15 @@ export class ZoteroReaderView extends ItemView {
         }
 
         try {
+            const revision =
+                await workerBridge.attachment.getReaderDocumentRevision(
+                    this.attachmentItem,
+                );
+            const documentKey = getLibraryReaderDocumentKey(
+                this.attachmentItem,
+                revision.kind === "external" ? revision : undefined,
+            );
+
             // Create bridge once
             if (!this.bridge) {
                 this.bridge = new IframeReaderBridge(
@@ -348,6 +356,7 @@ export class ZoteroReaderView extends ItemView {
                         throw e;
                     }
                 },
+                { reuse: revision.kind !== "volatile" },
             );
             try {
                 const [, lease] = await Promise.all([
