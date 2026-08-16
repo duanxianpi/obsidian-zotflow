@@ -284,6 +284,20 @@ describe("frontmatter", () => {
         expect(out).toContain("title: A Study of Things");
     });
 
+    test("a CRLF template's frontmatter is still detected", async () => {
+        const item = await seedArticle();
+        const out = await service.renderLibrarySourceNote(
+            item,
+            "---\r\nstatus: {{ item.itemType }}\r\n---\r\nbody",
+            {},
+        );
+        expect(out).toContain("status: journalArticle");
+        expect(out).toContain("body");
+        // The template's CRLF delimiters must be consumed by the frontmatter
+        // split, not leak into the body (which would mean detection failed).
+        expect(out).not.toContain("---\r\n");
+    });
+
     test("unparseable frontmatter is logged and skipped, not fatal", async () => {
         const item = await seedArticle();
         host.parseYaml = () => Promise.reject(new Error("bad yaml"));

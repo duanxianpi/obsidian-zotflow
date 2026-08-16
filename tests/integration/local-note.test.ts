@@ -149,6 +149,21 @@ describe("local template rendering", () => {
         expect(out).not.toContain("hand-written");
     });
 
+    test("a CRLF template's frontmatter is still detected", async () => {
+        const out = await templates.renderLocalNote(
+            pdf(),
+            [],
+            "---\r\nstatus: fresh\r\n---\r\nbody",
+            { status: "hand-written" },
+        );
+
+        expect(out).toContain("status: fresh");
+        expect(out).not.toContain("hand-written");
+        // The template's CRLF delimiters must be consumed by the frontmatter
+        // split, not leak into the body (which would mean detection failed).
+        expect(out).not.toContain("---\r\n");
+    });
+
     test("keys the template does not mention are carried over", async () => {
         const out = await templates.renderLocalNote(pdf(), [], "body", {
             "my-own-field": "kept",

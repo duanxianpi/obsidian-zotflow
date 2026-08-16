@@ -611,7 +611,7 @@ export class LibraryTemplateService {
             const template = templateContent || DEFAULT_ITEM_TEMPLATE;
 
             // Separate Frontmatter and Body
-            const frontmatterRegex = /^---\s*([\s\S]*?)\s*---\n/;
+            const frontmatterRegex = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
             const match = template.match(frontmatterRegex);
 
             let templateFrontmatterRaw = "";
