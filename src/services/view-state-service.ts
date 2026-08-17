@@ -76,21 +76,25 @@ export class ViewStateService {
         state: Record<string, unknown>,
     ): void {
         const entry = this._viewStates[key] ?? {};
+
+        // Deepcopy, remove the reader realm
+        const safeState = JSON.parse(JSON.stringify(state)) as Record<
+            string,
+            unknown
+        >;
+
         if (primary) {
-            entry.primaryViewState = state;
+            entry.primaryViewState = safeState;
         } else {
-            entry.secondaryViewState = state;
+            entry.secondaryViewState = safeState;
         }
+
         this._viewStates[key] = entry;
         this.schedulePersistViewStates();
     }
 
     /** Save a theme preference for an attachment and schedule a debounced persist. */
-    saveTheme(
-        key: string,
-        kind: "light" | "dark",
-        theme: unknown,
-    ): void {
+    saveTheme(key: string, kind: "light" | "dark", theme: unknown): void {
         const entry = this._viewStates[key] ?? {};
         if (kind === "light") {
             entry.lightTheme = theme as string | undefined;
