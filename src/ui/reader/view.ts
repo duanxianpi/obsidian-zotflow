@@ -39,6 +39,10 @@ interface ReaderViewState extends Record<string, unknown> {
 /** Obsidian `ItemView` that embeds the Zotero reader iframe for remote/cloud attachments. */
 const ff = fireAndForgetIn("ZoteroReaderView");
 
+/** In-flight setState calls, keyed by `libraryID:itemKey`, to close a race
+ * between two concurrent opens of the same attachment. */
+const openingReaders = new Map<string, WorkspaceLeaf>();
+
 export class ZoteroReaderView extends ItemView {
     private attachmentItem: IDBZoteroItem<AttachmentData>;
     private keyInfo: IDBZoteroKey;
@@ -53,6 +57,7 @@ export class ZoteroReaderView extends ItemView {
     private knownAnnotationIds = new Set<string>();
     private documentLease?: ReaderDocumentLease;
     private closing = false;
+    private readerState: ReaderViewState = { libraryID: 0, itemKey: "" };
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -122,48 +127,101 @@ export class ZoteroReaderView extends ItemView {
         state: ReaderViewState,
         result: ViewStateResult,
     ): Promise<void> {
-        const _keyInfo = await workerBridge.annotation.getKeyInfo(
-            services.settings.zoteroapikey,
-        );
+        this.readerState = state;
 
-        if (!_keyInfo) {
-            services.logService.error(
-                `Key ${services.settings.zoteroapikey} doesn't exist`,
+        // Single-instance guard: reveal an existing reader for this attachment
+        // and close the duplicate leaf before any async work starts.
+        const key = this.readerKey(state);
+        const existing = this.findExistingReaderLeaf(state);
+        if (existing && existing !== this.leaf) {
+            services.logService.warn(
+                `Attachment ${key} is already open; reusing existing reader leaf`,
                 "ZoteroReaderView",
             );
-            throw new Error(
-                `Key ${services.settings.zoteroapikey} doesn't exist`,
+            services.notificationService.notify(
+                "warning",
+                "This attachment is already open. Use the reader's built-in split view to open two views of the same attachment.",
             );
+            this.app.workspace.setActiveLeaf(existing);
+            void this.app.workspace.revealLeaf(existing);
+            window.setTimeout(() => this.leaf.detach(), 0);
+            return;
         }
 
-        if (state.itemKey) {
-            const _item = await workerBridge.dbHelper.getAttachmentItem(
-                state.libraryID,
-                state.itemKey,
+        openingReaders.set(key, this.leaf);
+        try {
+            const _keyInfo = await workerBridge.annotation.getKeyInfo(
+                services.settings.zoteroapikey,
             );
-            if (!_item) {
+
+            if (!_keyInfo) {
                 services.logService.error(
-                    `Item ${state.itemKey} doesn't exist or is not an attachment`,
+                    `Key ${services.settings.zoteroapikey} doesn't exist`,
                     "ZoteroReaderView",
                 );
                 throw new Error(
-                    `Item ${state.itemKey} doesn't exist or is not an attachment`,
+                    `Key ${services.settings.zoteroapikey} doesn't exist`,
                 );
             }
-            this.attachmentItem = _item;
 
-            this.keyInfo = _keyInfo;
-            this.containerEl
-                .getElementsByClassName("view-header-title")[0]
-                ?.setText(
-                    this.attachmentItem.raw.data.filename ??
-                        this.attachmentItem.raw.data.title ??
-                        "Zotero Reader",
+            if (state.itemKey) {
+                const _item = await workerBridge.dbHelper.getAttachmentItem(
+                    state.libraryID,
+                    state.itemKey,
                 );
-            ff(this.loadDocument(), "Failed to load document");
+                if (!_item) {
+                    services.logService.error(
+                        `Item ${state.itemKey} doesn't exist or is not an attachment`,
+                        "ZoteroReaderView",
+                    );
+                    throw new Error(
+                        `Item ${state.itemKey} doesn't exist or is not an attachment`,
+                    );
+                }
+                this.attachmentItem = _item;
+
+                this.keyInfo = _keyInfo;
+                this.containerEl
+                    .getElementsByClassName("view-header-title")[0]
+                    ?.setText(
+                        this.attachmentItem.raw.data.filename ??
+                            this.attachmentItem.raw.data.title ??
+                            "Zotero Reader",
+                    );
+                ff(this.loadDocument(), "Failed to load document");
+            }
+
+            return super.setState(state, result);
+        } finally {
+            if (openingReaders.get(key) === this.leaf) {
+                openingReaders.delete(key);
+            }
+        }
+    }
+
+    private readerKey(state: ReaderViewState): string {
+        return `${state.libraryID}:${state.itemKey}`;
+    }
+
+    /** Find another leaf already showing, or currently opening, this attachment. */
+    private findExistingReaderLeaf(state: ReaderViewState): WorkspaceLeaf | null {
+        for (const leaf of this.app.workspace.getLeavesOfType(
+            ZOTERO_READER_VIEW_TYPE,
+        )) {
+            if (leaf === this.leaf) continue;
+            const leafState = leaf.getViewState().state as
+                | Partial<ReaderViewState>
+                | null
+                | undefined;
+            if (
+                leafState?.libraryID === state.libraryID &&
+                leafState?.itemKey === state.itemKey
+            ) {
+                return leaf;
+            }
         }
 
-        return super.setState(state, result);
+        return openingReaders.get(this.readerKey(state)) ?? null;
     }
 
     private async loadDocument() {
@@ -524,10 +582,7 @@ export class ZoteroReaderView extends ItemView {
     }
 
     getState(): ReaderViewState {
-        return {
-            libraryID: this.attachmentItem.libraryID,
-            itemKey: this.attachmentItem.key,
-        };
+        return this.readerState;
     }
 
     async onClose() {

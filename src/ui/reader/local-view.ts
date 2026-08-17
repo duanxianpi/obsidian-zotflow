@@ -36,6 +36,10 @@ interface LocalReaderViewState extends Record<string, unknown> {
 /** Obsidian `ItemView` that embeds the Zotero reader iframe for local PDF/EPUB/HTML vault files. */
 const ff = fireAndForgetIn("LocalReaderView");
 
+/** In-flight setState calls, keyed by vault path, to close a race between two
+ * concurrent opens of the same local file. */
+const openingLocalReaders = new Map<string, WorkspaceLeaf>();
+
 export class LocalReaderView extends ItemView {
     private file: TFile | null = null;
     private bridge?: IframeReaderBridge;
@@ -46,6 +50,7 @@ export class LocalReaderView extends ItemView {
     private unsubscribeLocalAnnotationChanged?: () => void;
     private documentLease?: ReaderDocumentLease;
     private closing = false;
+    private localReaderState: LocalReaderViewState = {};
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -114,24 +119,69 @@ export class LocalReaderView extends ItemView {
     async onOpen() {}
 
     async setState(state: LocalReaderViewState, result: ViewStateResult) {
-        if (state.file) {
-            const file = services.app.vault.getAbstractFileByPath(state.file);
-            if (file instanceof TFile) {
-                this.file = file;
-                this.containerEl
-                    .getElementsByClassName("view-header-title")[0]
-                    ?.setText(this.file.name);
+        this.localReaderState = state;
 
-                ff(this.loadDocument(this.file), "Failed to load document");
+        // Single-instance guard: reveal an existing reader for this file and
+        // close the duplicate leaf before loading the document again.
+        if (state.file) {
+            const existing = this.findExistingLocalReaderLeaf(state.file);
+            if (existing && existing !== this.leaf) {
+                services.logService.warn(
+                    `Local attachment ${state.file} is already open; reusing existing reader leaf`,
+                    "LocalReaderView",
+                );
+                services.notificationService.notify(
+                    "warning",
+                    "This file is already open. Use the reader's built-in split view to open two views of the same file.",
+                );
+                this.app.workspace.setActiveLeaf(existing);
+                void this.app.workspace.revealLeaf(existing);
+                window.setTimeout(() => this.leaf.detach(), 0);
+                return;
+            }
+
+            openingLocalReaders.set(state.file, this.leaf);
+            try {
+                const file = services.app.vault.getAbstractFileByPath(
+                    state.file,
+                );
+                if (file instanceof TFile) {
+                    this.file = file;
+                    this.containerEl
+                        .getElementsByClassName("view-header-title")[0]
+                        ?.setText(this.file.name);
+
+                    ff(this.loadDocument(this.file), "Failed to load document");
+                }
+            } finally {
+                if (openingLocalReaders.get(state.file) === this.leaf) {
+                    openingLocalReaders.delete(state.file);
+                }
             }
         }
         return super.setState(state, result);
     }
 
+    /** Find another leaf already showing, or currently opening, this file. */
+    private findExistingLocalReaderLeaf(path: string): WorkspaceLeaf | null {
+        for (const leaf of this.app.workspace.getLeavesOfType(
+            LOCAL_ZOTERO_READER_VIEW_TYPE,
+        )) {
+            if (leaf === this.leaf) continue;
+            const leafState = leaf.getViewState().state as
+                | Partial<LocalReaderViewState>
+                | null
+                | undefined;
+            if (leafState?.file === path) {
+                return leaf;
+            }
+        }
+
+        return openingLocalReaders.get(path) ?? null;
+    }
+
     getState(): LocalReaderViewState {
-        return {
-            file: this.file?.path,
-        };
+        return this.localReaderState;
     }
 
     private async loadDocument(file: TFile) {
