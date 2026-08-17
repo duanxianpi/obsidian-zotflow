@@ -344,6 +344,24 @@ describe("local attachment notes", () => {
         ).toBe("pdf/Some Paper.md");
     });
 
+    test("exposes the attachment directory", async () => {
+        expect(
+            await h.notePath.resolveLocalNotePath(
+                localFile(),
+                "Notes/{{directory}}/{{basename}}",
+            ),
+        ).toBe("Notes/Attachments/2024/Some Paper.md");
+
+        // Root-level attachments have no directory, and sanitizePath
+        // collapses the empty segment.
+        expect(
+            await h.notePath.resolveLocalNotePath(
+                localFile({ path: "Some Paper.pdf" }),
+                "Notes/{{directory}}/{{basename}}",
+            ),
+        ).toBe("Notes/Some Paper.md");
+    });
+
     test("the source path keeps its separators", async () => {
         // `path` is on the ignore list, so a template can mirror the vault
         // layout of the attachment it belongs to.

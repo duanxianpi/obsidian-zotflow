@@ -177,7 +177,7 @@ export class SourceNotesSection {
                     },
                     {
                         name: "Local Source Note Path Template",
-                        desc: "LiquidJS template for local source note file path (without .md extension).",
+                        desc: "LiquidJS template for local source note file path (without .md extension). Variables: basename, name, extension, path, and directory.",
                         control: {
                             type: "text",
                             key: "localSourceNotePathTemplate",

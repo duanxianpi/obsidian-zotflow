@@ -35,6 +35,7 @@ const IGNORE_KEYS: ReadonlySet<string> = new Set([
     "dateModified",
     "accessDate",
     "path",
+    "directory",
     "itemPaths",
 ]);
 
@@ -188,10 +189,17 @@ export class NotePathService {
             this.settings.localSourceNotePathTemplate.trim() ||
             FALLBACK_LOCAL_TEMPLATE;
 
+        const lastSlash = localAttachment.path.lastIndexOf("/");
+        const directory =
+            lastSlash !== -1
+                ? localAttachment.path.substring(0, lastSlash)
+                : "";
+
         const context = {
             basename: localAttachment.basename,
             name: localAttachment.name,
             path: localAttachment.path,
+            directory,
             extension: localAttachment.extension,
         };
 
