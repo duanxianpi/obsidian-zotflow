@@ -35,3 +35,6 @@ coverage/
 
 # Claude Code
 .claude
+
+# Internal Docs
+docs/
