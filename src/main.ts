@@ -54,6 +54,7 @@ import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "ui/note-editor/view";
 import { ZotFlowRegionDecorationExtension } from "ui/editor/zotflow-region-decoration-extension";
 import { CitationSuggest } from "ui/editor/citation-suggest";
 import { fireAndForgetIn } from "utils/fire-and-forget";
+import { focusReaderLeaf } from "utils/reader-leaf-navigation";
 
 const SUPPORTED_EXTENSIONS = ["pdf", "epub", "html"];
 
@@ -1113,16 +1114,15 @@ export default class ZotFlow extends Plugin {
                 (leaf) =>
                     (leaf.view as LocalReaderView).getState()?.file ===
                     dest.path,
-            );
+        );
         if (existing) {
-            this.app.workspace.setActiveLeaf(existing);
-            void this.app.workspace.revealLeaf(existing);
+            await focusReaderLeaf(this.app.workspace, existing);
             return;
         }
 
         const leaf = this.app.workspace.getLeaf("tab");
         await leaf.openFile(dest);
-        void this.app.workspace.revealLeaf(leaf);
+        await focusReaderLeaf(this.app.workspace, leaf);
     }
 
     async handleFileOpen(file: TFile | null) {

@@ -3,6 +3,7 @@ import { ZOTERO_READER_VIEW_TYPE, ZoteroReaderView } from "../ui/reader/view";
 import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "../ui/note-editor/view";
 import { workerBridge } from "../bridge";
 import { services } from "../services/services";
+import { focusReaderLeaf } from "utils/reader-leaf-navigation";
 
 import type { ReaderNavigation } from "types/zotero-reader";
 
@@ -39,7 +40,7 @@ export async function openAttachment(
     }
 
     if (activeLeaf) {
-        app.workspace.setActiveLeaf(activeLeaf);
+        await focusReaderLeaf(app.workspace, activeLeaf);
     } else {
         activeLeaf = app.workspace.getLeaf("tab");
 
@@ -52,7 +53,7 @@ export async function openAttachment(
             },
         });
 
-        void app.workspace.revealLeaf(activeLeaf);
+        await focusReaderLeaf(app.workspace, activeLeaf);
     }
 
     if (navigationInfo) {

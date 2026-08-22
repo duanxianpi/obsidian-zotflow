@@ -24,6 +24,7 @@ import {
 } from "services/reader-document-cache";
 import { errorMessage as describeError } from "utils/error";
 import { fireAndForgetIn } from "utils/fire-and-forget";
+import { redirectDuplicateReaderLeaf } from "utils/reader-leaf-navigation";
 
 /** View type identifier for the local vault file reader view. */
 export const LOCAL_ZOTERO_READER_VIEW_TYPE = "zotflow-local-zotero-reader-view";
@@ -134,9 +135,14 @@ export class LocalReaderView extends ItemView {
                     "warning",
                     "This file is already open. Use the reader's built-in split view to open two views of the same file.",
                 );
-                this.app.workspace.setActiveLeaf(existing);
-                void this.app.workspace.revealLeaf(existing);
-                window.setTimeout(() => this.leaf.detach(), 0);
+                ff(
+                    redirectDuplicateReaderLeaf(
+                        this.app.workspace,
+                        this.leaf,
+                        existing,
+                    ),
+                    "Failed to redirect a duplicate reader leaf",
+                );
                 return;
             }
 
@@ -153,11 +159,13 @@ export class LocalReaderView extends ItemView {
 
                     ff(this.loadDocument(this.file), "Failed to load document");
                 }
+                await super.setState(state, result);
             } finally {
                 if (openingLocalReaders.get(state.file) === this.leaf) {
                     openingLocalReaders.delete(state.file);
                 }
             }
+            return;
         }
         return super.setState(state, result);
     }

@@ -1,3 +1,27 @@
+/**
+ * Reader document cache.
+ *
+ * Originally this cache existed so multiple reader leaves could share one
+ * downloaded/downloaded-from-vault blob for the same immutable document
+ * version (for example the same Zotero attachment or local vault file open
+ * in two tabs).
+ *
+ * Since the single-instance guards were added to `ZoteroReaderView` and
+ * `LocalReaderView`, a document can no longer be open in more than one leaf
+ * at a time. The cross-leaf sharing path is therefore dead. The cache still
+ * serves two much smaller purposes today:
+ *
+ * 1. It coalesces overlapping `loadDocument`/`renderReader` calls inside a
+ *    single view, so a rapid re-open does not read the file or create a
+ *    second object URL.
+ * 2. It owns the object URL lifecycle and revokes every live URL on plugin
+ *    unload.
+ *
+ * If overlapping loads within one view are ever made impossible as well,
+ * this class can be removed and the callers can manage their object URLs
+ * directly.
+ */
+
 import type { TFile } from "obsidian";
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";

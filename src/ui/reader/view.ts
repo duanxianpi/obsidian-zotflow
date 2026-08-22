@@ -27,6 +27,7 @@ import {
     errorMessage as describeError,
 } from "utils/error";
 import { fireAndForgetIn } from "utils/fire-and-forget";
+import { redirectDuplicateReaderLeaf } from "utils/reader-leaf-navigation";
 
 /** View type identifier for the Zotero cloud reader view. */
 export const ZOTERO_READER_VIEW_TYPE = "zotflow-zotero-reader-view";
@@ -142,9 +143,14 @@ export class ZoteroReaderView extends ItemView {
                 "warning",
                 "This attachment is already open. Use the reader's built-in split view to open two views of the same attachment.",
             );
-            this.app.workspace.setActiveLeaf(existing);
-            void this.app.workspace.revealLeaf(existing);
-            window.setTimeout(() => this.leaf.detach(), 0);
+            ff(
+                redirectDuplicateReaderLeaf(
+                    this.app.workspace,
+                    this.leaf,
+                    existing,
+                ),
+                "Failed to redirect a duplicate reader leaf",
+            );
             return;
         }
 
@@ -191,7 +197,7 @@ export class ZoteroReaderView extends ItemView {
                 ff(this.loadDocument(), "Failed to load document");
             }
 
-            return super.setState(state, result);
+            await super.setState(state, result);
         } finally {
             if (openingReaders.get(key) === this.leaf) {
                 openingReaders.delete(key);
