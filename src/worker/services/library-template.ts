@@ -40,6 +40,7 @@ import {
     zfEnv,
     type LiquidFilterScope,
 } from "./liquid-support";
+import { mergeTemplateFrontmatter } from "utils/template-frontmatter";
 
 const DEFAULT_ITEM_TEMPLATE = `---
 citationKey: {{ item.citationKey | json }}
@@ -655,23 +656,10 @@ export class LibraryTemplateService {
             //   bare `key`          => overwrite (default; refreshed each
             //                          update from the rendered template)
             // The `??` prefix is stripped from the final key.
-            const finalFrontmatter: Record<string, unknown> = {
-                ...originalFrontmatter,
-            };
-            for (const [rawKey, value] of Object.entries(
-                templateFrontmatter || {},
-            )) {
-                const preserve = rawKey.startsWith("??");
-                const key = preserve ? rawKey.slice(2) : rawKey;
-                if (!key) continue;
-                if (preserve) {
-                    if (!(key in finalFrontmatter)) {
-                        finalFrontmatter[key] = value;
-                    }
-                } else {
-                    finalFrontmatter[key] = value;
-                }
-            }
+            const finalFrontmatter = mergeTemplateFrontmatter(
+                originalFrontmatter,
+                templateFrontmatter,
+            );
 
             // Ensure Mandatory Fields (always overwritten)
             finalFrontmatter["zotflow-locked"] = true;

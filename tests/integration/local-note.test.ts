@@ -149,6 +149,36 @@ describe("local template rendering", () => {
         expect(out).not.toContain("hand-written");
     });
 
+    test("a `??` key is written only when the note does not have it", async () => {
+        const fresh = await templates.renderLocalNote(
+            pdf(),
+            [],
+            "---\n??rating: unrated\n---\nbody",
+            {},
+        );
+        expect(fresh).toContain("rating: unrated");
+
+        const existing = await templates.renderLocalNote(
+            pdf(),
+            [],
+            "---\n??rating: unrated\n---\nbody",
+            { rating: "5 stars" },
+        );
+        expect(existing).toContain("rating: 5 stars");
+        expect(existing).not.toContain("unrated");
+    });
+
+    test("the `??` prefix never reaches a local source note", async () => {
+        const out = await templates.renderLocalNote(
+            pdf(),
+            [],
+            "---\n??rating: unrated\n---\nbody",
+            {},
+        );
+
+        expect(out).not.toContain("??");
+    });
+
     test("a CRLF template's frontmatter is still detected", async () => {
         const out = await templates.renderLocalNote(
             pdf(),
