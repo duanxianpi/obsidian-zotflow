@@ -1,10 +1,13 @@
-import { App, MarkdownView, TFile } from "obsidian";
+import { App, MarkdownView, Notice, TFile, normalizePath } from "obsidian";
 import { ZOTERO_READER_VIEW_TYPE, ZoteroReaderView } from "../ui/reader/view";
 import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "../ui/note-editor/view";
 import { workerBridge } from "../bridge";
 import { services } from "../services/services";
+import { saveBinaryFile } from "utils/file";
 
 import type { ReaderNavigation } from "types/zotero-reader";
+import type { AttachmentData } from "types/zotero-item";
+import type { IDBZoteroItem } from "types/db-schema";
 
 /**
  * Open an attachment in the default application.
@@ -60,6 +63,61 @@ export async function openAttachment(
             JSON.parse(navigationInfo) as ReaderNavigation,
         );
     }
+}
+
+/**
+ * Copy a Zotero PDF attachment into the vault and open it with Obsidian's
+ * native PDF viewer. This is intentionally opt-in: ZotFlow's own reader and
+ * annotation sync remain the default attachment workflow.
+ */
+export async function openAttachmentInNativePdfViewer(
+    libraryID: number,
+    key: string,
+    app: App,
+): Promise<void> {
+    if (services.settings.overwriteViewer) {
+        new Notice(
+            "Disable ZotFlow's PDF/EPUB/HTML Viewer override before opening attachments in Obsidian's native PDF viewer.",
+            8000,
+        );
+        return;
+    }
+
+    const attachment = await workerBridge.dbHelper.getItem(libraryID, key);
+    if (!attachment || attachment.itemType !== "attachment") {
+        throw new Error("Attachment metadata could not be found.");
+    }
+
+    const filename = attachment.raw.data.filename;
+    if (
+        !filename ||
+        filename === "." ||
+        filename === ".." ||
+        filename.includes("/") ||
+        filename.includes("\\")
+    ) {
+        throw new Error("Attachment has no valid filename.");
+    }
+
+    const vaultPath = normalizePath(
+        `Zotero Attachments/${libraryID}/${key}/${filename}`,
+    );
+    let file = app.vault.getAbstractFileByPath(vaultPath);
+    if (!(file instanceof TFile)) {
+        new Notice("Copying attachment into the vault…");
+        const { blob } = await workerBridge.downloadAttachment(
+            attachment as IDBZoteroItem<AttachmentData>,
+        );
+        file = await saveBinaryFile(app, vaultPath, await blob.arrayBuffer());
+    }
+
+    if (!(file instanceof TFile)) {
+        throw new Error("Attachment could not be copied into the vault.");
+    }
+
+    const leaf = app.workspace.getLeaf("tab");
+    await leaf.openFile(file);
+    void app.workspace.revealLeaf(leaf);
 }
 
 /**

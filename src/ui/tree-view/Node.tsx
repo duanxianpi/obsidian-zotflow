@@ -11,6 +11,7 @@ import { workerBridge } from "bridge";
 
 import {
     openAttachment,
+    openAttachmentInNativePdfViewer,
     openItemNote,
     openItemNoteInEditor,
     openItemNoteInSourceNote,
@@ -484,6 +485,35 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
         }
 
         if (nodeType === "item") {
+            if (
+                node.data.itemType === "attachment" &&
+                (node.data.contentType === "application/pdf" ||
+                    node.data.name.toLowerCase().endsWith(".pdf"))
+            ) {
+                menu.addItem((item) => {
+                    item.setTitle("Open in Obsidian native PDF viewer")
+                        .setIcon("file-text")
+                        .onClick(async () => {
+                            try {
+                                await openAttachmentInNativePdfViewer(
+                                    node.data.libraryID,
+                                    node.data.key,
+                                    services.app,
+                                );
+                            } catch (err) {
+                                services.logService.error(
+                                    "Failed to open attachment in native PDF viewer",
+                                    "TreeView",
+                                    err,
+                                );
+                                services.notificationService.notify(
+                                    "error",
+                                    "Failed to open attachment in Obsidian's native PDF viewer.",
+                                );
+                            }
+                        });
+                });
+            }
             menu.addItem((item) => {
                 item.setTitle("Open in Zotero")
                     .setIcon("external-link")
