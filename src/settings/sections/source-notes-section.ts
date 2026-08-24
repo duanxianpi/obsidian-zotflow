@@ -145,13 +145,13 @@ export class SourceNotesSection {
                         },
                     },
                     {
-                        name: "Zotero Storage Path",
-                        desc: "Absolute path to Zotero's storage directory (e.g. C:\\Users\\name\\Zotero\\storage). Enter the complete path without using a home-directory shortcut such as ~.",
+                        name: "Zotero Storage Paths",
+                        desc: "One or more absolute paths to Zotero storage directories, separated by semicolons. ZotFlow checks them in order (e.g. C:\\Users\\name\\Zotero\\storage; D:\\Archive\\Zotero\\storage). Do not use a home-directory shortcut such as ~.",
                         control: {
                             type: "text",
                             key: "zoteroStoragePath",
                             placeholder:
-                                "e.g. C:\\Users\\name\\Zotero\\storage",
+                                "e.g. C:\\Users\\name\\Zotero\\storage; D:\\Archive\\Zotero\\storage",
                         },
                     },
                 ],

@@ -90,15 +90,10 @@ export class AttachmentService {
             (linkMode === "imported_file" || linkMode === "imported_url") &&
             (await this.parentHost.isDesktopApp())
         ) {
-            const storagePath = this.settings.zoteroStoragePath.trim();
-            if (!storagePath) {
-                throw new ZotFlowError(
-                    ZotFlowErrorCode.CONFIG_MISSING,
-                    "AttachmentService",
-                    "Zotero storage path is not configured",
-                );
-            }
-            return this.resolveLocalStorageFilePath(item, storagePath);
+            return this.resolveExistingLocalStorageFilePath(
+                item,
+                this.getZoteroStoragePaths(),
+            );
         }
 
         return null;
@@ -1001,24 +996,13 @@ export class AttachmentService {
     private async readFromLocalStorage(
         item: IDBZoteroItem<AttachmentData>,
     ): Promise<Blob> {
-        const storagePath = this.settings.zoteroStoragePath.trim();
-        if (!storagePath) {
-            const message =
-                "Zotero storage path is not configured. Configure Zotero Storage Path in ZotFlow settings.";
-            this.parentHost.notify("error", message);
-            throw new ZotFlowError(
-                ZotFlowErrorCode.CONFIG_MISSING,
-                "AttachmentService",
-                message,
-            );
-        }
-
+        const storagePaths = this.getZoteroStoragePaths();
         const itemKey = this.requireStoragePathSegment(item.key, "item key");
         let filePath: string | undefined;
         try {
-            filePath = await this.resolveLocalStorageFilePath(
+            filePath = await this.resolveExistingLocalStorageFilePath(
                 item,
-                storagePath,
+                storagePaths,
             );
             this.parentHost.log(
                 "info",
@@ -1050,9 +1034,68 @@ export class AttachmentService {
                 ZotFlowErrorCode.RESOURCE_MISSING,
                 "AttachmentService",
                 message,
-                { itemKey, filePath, storagePath },
+                { itemKey, filePath, storagePaths },
             );
         }
+    }
+
+    /**
+     * Parse the existing storage setting as an ordered list. A single path is
+     * still accepted unchanged; additional paths may be separated by semicolons
+     * or line breaks.
+     */
+    private getZoteroStoragePaths(): string[] {
+        const storagePaths = this.settings.zoteroStoragePath
+            .split(/[;\r\n]+/)
+            .map((path) => path.trim())
+            .filter((path) => path.length > 0);
+
+        if (storagePaths.length === 0) {
+            throw new ZotFlowError(
+                ZotFlowErrorCode.CONFIG_MISSING,
+                "AttachmentService",
+                "Zotero storage path is not configured. Configure Zotero Storage Path in ZotFlow settings.",
+            );
+        }
+
+        return [...new Set(storagePaths)];
+    }
+
+    /** Resolve the first configured Zotero storage path that contains the attachment. */
+    private async resolveExistingLocalStorageFilePath(
+        item: IDBZoteroItem<AttachmentData>,
+        storagePaths: string[],
+    ): Promise<string> {
+        const attemptedPaths: string[] = [];
+        let lastError: unknown;
+
+        for (const storagePath of storagePaths) {
+            const filePath = await this.resolveLocalStorageFilePath(
+                item,
+                storagePath,
+            );
+            attemptedPaths.push(filePath);
+
+            try {
+                await this.parentHost.statExternalFile(filePath);
+                return filePath;
+            } catch (error) {
+                lastError = error;
+                this.parentHost.log(
+                    "debug",
+                    "Attachment was not found in configured Zotero storage directory.",
+                    "AttachmentService",
+                    { filePath, error },
+                );
+            }
+        }
+
+        throw new ZotFlowError(
+            ZotFlowErrorCode.RESOURCE_MISSING,
+            "AttachmentService",
+            "Attachment was not found in any configured Zotero storage directory.",
+            { storagePaths, attemptedPaths, cause: lastError },
+        );
     }
 
     private async resolveLocalStorageFilePath(
