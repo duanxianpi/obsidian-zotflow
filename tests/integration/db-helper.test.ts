@@ -514,6 +514,24 @@ describe("searchItems", () => {
         expect(found.map((i) => i.key)).toEqual(["BITCOIN0"]);
     });
 
+    test("matches an accented creator with a plain-letter query", async () => {
+        await seedItem({
+            libraryID: USER_ID,
+            key: "DIACRITC",
+            title: "Accent Study",
+            searchCreators: ["Lämmermann"],
+        });
+
+        const freeText = await h.dbHelper.searchItems("Lammermann", 10);
+        expect(freeText.map((i) => i.key)).toEqual(["DIACRITC"]);
+
+        const filtered = await h.dbHelper.searchItems(
+            "creator:Lammermann",
+            10,
+        );
+        expect(filtered.map((i) => i.key)).toEqual(["DIACRITC"]);
+    });
+
     test("matches on a tag", async () => {
         const found = await h.dbHelper.searchItems("transformer", 10);
         expect(found.map((i) => i.key)).toEqual(["ATTENTIO"]);

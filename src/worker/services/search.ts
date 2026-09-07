@@ -28,6 +28,11 @@ export interface SearchableRecord {
 /** Separator used when concatenating fields into a single fuzzy haystack. */
 const HAYSTACK_SEP = " \u00b7 ";
 
+/** Normalize common Latin diacritics without changing stored/displayed text. */
+function foldForSearch(value: string): string {
+    return uFuzzy.latinize(value.normalize("NFC"));
+}
+
 /**
  * Worker-only shared search brain. Owns the single fuzzy engine (uFuzzy) and
  * the filter-evaluation logic so that the tree view and the item search modal
@@ -54,18 +59,28 @@ export class SearchService {
         records: SearchableRecord[],
         limit?: number,
     ): SearchableRecord[] {
-        const filtered = query.filters.length
-            ? records.filter((r) => this.passesFilters(query.filters, r))
+        const filters = query.filters.map((filter) => ({
+            ...filter,
+            value: foldForSearch(filter.value).toLowerCase(),
+        }));
+        const filtered = filters.length
+            ? records.filter((r) => this.passesFilters(filters, r))
             : records;
 
         if (!query.free) {
             return limit != null ? filtered.slice(0, limit) : filtered;
         }
 
-        const haystack = filtered.map((r) => this.buildHaystack(r));
+        const haystack = filtered.map((r) =>
+            foldForSearch(this.buildHaystack(r)),
+        );
         // outOfOrder permutation cap enables cross-field term reordering
         // (e.g. "smith attention" matching a title + a separate author field).
-        const [idxs, info, order] = this.uf.search(haystack, query.free, 4);
+        const [idxs, info, order] = this.uf.search(
+            haystack,
+            foldForSearch(query.free),
+            4,
+        );
 
         if (!idxs || idxs.length === 0) return [];
 
@@ -103,23 +118,23 @@ export class SearchService {
         value: string,
         r: SearchableRecord,
     ): boolean {
+        const needle = value;
+        const includesNeedle = (candidate: string | undefined) =>
+            foldForSearch(candidate ?? "").toLowerCase().includes(needle);
+
         switch (field) {
             case "library":
-                return (r.libraryName ?? "").toLowerCase().includes(value);
+                return includesNeedle(r.libraryName);
             case "collection":
                 return (r.collections ?? []).some((c) =>
-                    c.toLowerCase().includes(value),
+                    includesNeedle(c),
                 );
             case "tag":
-                return (r.tags ?? []).some((t) =>
-                    t.toLowerCase().includes(value),
-                );
+                return (r.tags ?? []).some((t) => includesNeedle(t));
             case "creator":
-                return (r.creators ?? []).some((c) =>
-                    c.toLowerCase().includes(value),
-                );
+                return (r.creators ?? []).some((c) => includesNeedle(c));
             case "type":
-                return (r.itemType ?? "").toLowerCase().includes(value);
+                return includesNeedle(r.itemType);
             default:
                 return false;
         }
