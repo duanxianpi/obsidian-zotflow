@@ -219,10 +219,21 @@ export async function parsePack(
             throw new PackError("resource-limit", "Pack file is too large");
         requireValid(source.byteLength >= 121, "Missing v2 footer");
         const bytes = new Uint8Array(source);
+        // Installed Obsidian plugins can have this exact comment appended to
+        // main.js. It is outside our container; offsets still start at its footer.
+        // Do not scan arbitrary JS or accept other trailing content.
+        const installComment = "\n/* nosourcemap */";
+        const end =
+            new TextDecoder().decode(bytes.subarray(-installComment.length)) ===
+            installComment
+                ? bytes.length - installComment.length
+                : bytes.length;
         // Layout: executable + 9-byte OPEN + payload + base64 directory + 112-byte footer.
         // Locate backwards from EOF so JavaScript text and Unicode before OPEN are irrelevant.
-        const footerStart = bytes.length - 112;
-        const footer = new TextDecoder().decode(bytes.subarray(footerStart));
+        const footerStart = end - 112;
+        const footer = new TextDecoder().decode(
+            bytes.subarray(footerStart, end),
+        );
         const fields =
             /^\nZFEP2\|([0-9a-f]{16})\|([0-9a-f]{16})\|([0-9a-f]{64})\|END\*\/\n$/.exec(
                 footer,

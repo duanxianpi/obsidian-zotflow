@@ -7,6 +7,7 @@ import type { PackLease } from "enhancement-pack/types";
  * bundled from zotero/document-worker commit 6d0c0ce (Zotero 10.0.0).
  */
 import * as Comlink from "comlink";
+import SparkMD5 from "spark-md5";
 import { db } from "db/db";
 import type { ZotFlowSettings } from "settings/types";
 import type { IParentProxy } from "bridge/types";
@@ -102,10 +103,10 @@ export interface PDFImportResult {
 
 export interface StructuredDocumentTextOptions {
     contentType: string;
-    sourceHash: string;
+    /** Reuse the opened bytes' digest; local documents compute it on demand here. */
+    sourceHash?: string;
     isPriority?: boolean;
     password?: string;
-    onProgress?: (progress: number) => void;
 }
 
 export interface PDFRecognizerData {
@@ -713,50 +714,68 @@ export class DocumentWorkerService {
     async getStructuredDocumentText(
         buf: ArrayBuffer,
         options: StructuredDocumentTextOptions,
+        onProgress?: (progress: number) => void,
     ): Promise<ArrayBuffer> {
-        if (!options.contentType.trim()) {
-            throw new ZotFlowError(
-                ZotFlowErrorCode.CONFIG_MISSING,
-                "DocumentWorkerService",
-                "Structured document content type is required",
-            );
-        }
-        if (!/^[0-9a-f]{32}$/.test(options.sourceHash)) {
-            throw new ZotFlowError(
-                ZotFlowErrorCode.PARSE_ERROR,
-                "DocumentWorkerService",
-                "Structured document source hash must be a lowercase MD5",
-            );
-        }
-
-        return this._enqueue(async () => {
-            try {
-                const response = await this._query<BufferResponse>(
-                    "getStructuredDocumentText",
-                    {
-                        buf,
-                        contentType: options.contentType,
-                        password: options.password,
-                        sourceHash: options.sourceHash,
-                        reportProgress:
-                            typeof options.onProgress === "function",
-                    },
-                    [buf],
-                    { onProgress: options.onProgress },
-                );
-                return response.buf;
-            } catch (e) {
-                // A failed SDT run may leave partially initialized models. Rebuild
-                // its Worker before retrying so resources cannot mix generations.
-                this.resetWorker();
-                throw ZotFlowError.wrap(
-                    e,
-                    ZotFlowErrorCode.PARSE_ERROR,
+        try {
+            if (!options.contentType.trim()) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.CONFIG_MISSING,
                     "DocumentWorkerService",
-                    "Structured document text generation failed",
+                    "Structured document content type is required",
                 );
             }
-        }, options.isPriority);
+            if (
+                options.sourceHash !== undefined &&
+                !/^[0-9a-f]{32}$/.test(options.sourceHash)
+            ) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.PARSE_ERROR,
+                    "DocumentWorkerService",
+                    "Structured document source hash must be a lowercase MD5",
+                );
+            }
+
+            return await this._enqueue(async () => {
+                try {
+                    const response = await this._query<BufferResponse>(
+                        "getStructuredDocumentText",
+                        {
+                            buf,
+                            contentType: options.contentType,
+                            password: options.password,
+                            // Required by Zotero's SDT pack format. This is the document
+                            // identity, not another Enhancement Pack integrity check.
+                            sourceHash:
+                                options.sourceHash ??
+                                SparkMD5.ArrayBuffer.hash(buf),
+                            reportProgress: typeof onProgress === "function",
+                        },
+                        [buf],
+                        { onProgress },
+                    );
+                    return Comlink.transfer(response.buf, [response.buf]);
+                } catch (e) {
+                    // A failed SDT run may leave partially initialized models. Rebuild
+                    // its Worker before retrying so resources cannot mix generations.
+                    this.resetWorker();
+                    throw ZotFlowError.wrap(
+                        e,
+                        ZotFlowErrorCode.PARSE_ERROR,
+                        "DocumentWorkerService",
+                        "Structured document text generation failed",
+                    );
+                }
+            }, options.isPriority);
+        } finally {
+            // The callback's MessagePort belongs to this one request. Release it
+            // on both success and failure; direct test/local callbacks have none.
+            const release = (
+                onProgress as
+                    | Partial<Comlink.Remote<NonNullable<typeof onProgress>>>
+                    | undefined
+            )?.[Comlink.releaseProxy];
+            release?.();
+        }
     }
 
     /**

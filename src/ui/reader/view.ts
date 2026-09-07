@@ -541,6 +541,7 @@ export class ZoteroReaderView extends ItemView {
             this.fileContentMD5 = this.documentLease.contentMD5;
             await this.bridge.initReader({
                 data: { buf: null, url: this.documentLease.url },
+                contentMD5: this.documentLease.contentMD5,
                 type: type,
                 authorName,
                 ...opts,

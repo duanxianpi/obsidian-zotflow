@@ -15,6 +15,8 @@ import { connect, WindowMessenger, type Connection } from "penpal";
 import { getBlobUrls } from "bundle-assets/inline-assets";
 import { services } from "services/services";
 import { workerBridge } from "bridge";
+import { requestReaderSDT } from "ui/reader/sdt";
+import { EnhancementPackInstallModal } from "ui/modals/enhancement-pack-install";
 
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
@@ -76,6 +78,7 @@ export class IframeReaderBridge {
     private editorList: EmbeddableMarkdownEditor[] = [];
     private rendererList: Component[] = [];
     private _readerOpts: CreateReaderOptions | undefined;
+    private packInstallModal?: EnhancementPackInstallModal;
 
     private token: string | null = null;
 
@@ -178,7 +181,28 @@ export class IframeReaderBridge {
     }
 
     private buildParentAPI(): ParentAPI {
+        const generation = this.connectGeneration;
         return {
+            getSDTPack: (options) => {
+                const document = this._readerOpts;
+                if (!document)
+                    return Promise.resolve({
+                        ok: false,
+                        reason: "unavailable",
+                    });
+                return requestReaderSDT(
+                    document,
+                    options,
+                    () =>
+                        !this.permanentlyDisposed &&
+                        generation === this.connectGeneration &&
+                        this._readerOpts?.data === document.data,
+                    () => {
+                        this.packInstallModal =
+                            EnhancementPackInstallModal.show(services.app);
+                    },
+                );
+            },
             getBlobUrlMap: () => getBlobUrls(),
 
             isAndroidApp: () => Platform.isAndroidApp,
@@ -772,6 +796,8 @@ export class IframeReaderBridge {
 
             this._state = "disposing";
             ++this.connectGeneration;
+            this.packInstallModal?.close();
+            this.packInstallModal = undefined;
 
             this.editorList.forEach((editor) => editor.onunload());
             this.editorList.length = 0;

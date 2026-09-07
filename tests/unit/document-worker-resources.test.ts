@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import * as Comlink from "comlink";
 import { EnhancementResourceService } from "worker/services/enhancement-resources";
 import { DEFAULT_SETTINGS } from "settings/types";
 import { DocumentWorkerService } from "worker/services/document-worker";
@@ -52,6 +53,58 @@ beforeEach(async () => {
 });
 
 describe("DocumentWorkerService resources", () => {
+    test("computes a missing document MD5 in the Worker and releases a real Comlink progress callback", async () => {
+        const harness = createWorkerHarness();
+        const processor = new DocumentWorkerService(
+            { ...DEFAULT_SETTINGS },
+            createFakeParentHost(),
+            { "document-worker/worker.js": "blob:document-worker" },
+            new EnhancementResourceService(),
+        );
+        const channel = new MessageChannel();
+        Comlink.expose(processor, channel.port1);
+        const remote = Comlink.wrap<DocumentWorkerService>(channel.port2);
+        const progress = vi.fn();
+        const finalized = vi.fn();
+        Object.assign(progress, { [Comlink.finalizer]: finalized });
+        try {
+            const input = new TextEncoder().encode("abc").buffer;
+            const pending = remote.getStructuredDocumentText(
+                Comlink.transfer(input, [input]),
+                { contentType: "application/pdf" },
+                Comlink.proxy(progress),
+            );
+            await vi.waitFor(() =>
+                expect(harness.postMessage).toHaveBeenCalled(),
+            );
+            const request = harness.postMessage.mock
+                .calls[0]![0] as PostedWorkerMessage;
+            expect(input.byteLength).toBe(0);
+            expect(request.data.sourceHash).toBe(
+                "900150983cd24fb0d6963f7d28e17f72",
+            );
+            harness.emitMessage({
+                progressID: request.id,
+                data: { progress: 25 },
+            });
+            await vi.waitFor(() => expect(progress).toHaveBeenCalledWith(25));
+            const output = new Uint8Array([7, 8]).buffer;
+            harness.emitMessage({
+                responseID: request.id,
+                data: { buf: output },
+            });
+            expect(new Uint8Array(await pending)).toEqual(
+                new Uint8Array([7, 8]),
+            );
+            expect(output.byteLength).toBe(0);
+            await vi.waitFor(() => expect(finalized).toHaveBeenCalledOnce());
+        } finally {
+            processor.dispose();
+            remote[Comlink.releaseProxy]();
+            channel.port1.close();
+            channel.port2.close();
+        }
+    });
     test("leases the disabled Pack on SDT resource demand and never shadows it with inline data", async () => {
         createWorkerHarness();
         const host = createFakeParentHost();
@@ -229,11 +282,14 @@ describe("DocumentWorkerService structured document text", () => {
         const output = new ArrayBuffer(4);
         const onProgress = vi.fn();
 
-        const promise = processor.getStructuredDocumentText(input, {
-            contentType: "application/pdf",
-            sourceHash: "0123456789abcdef0123456789abcdef",
+        const promise = processor.getStructuredDocumentText(
+            input,
+            {
+                contentType: "application/pdf",
+                sourceHash: "0123456789abcdef0123456789abcdef",
+            },
             onProgress,
-        });
+        );
 
         await vi.waitFor(() => expect(harness.postMessage).toHaveBeenCalled());
         const request = harness.postMessage.mock.calls[0]?.[0] as

@@ -14,6 +14,8 @@ export interface CreateReaderOptions {
     platform?: string;
 
     password?: string;
+    /** Digest of these exact opened bytes, when already computed during download. */
+    contentMD5?: string;
     preview?: boolean;
     colorScheme?: ColorScheme;
     customThemes?: CustomReaderTheme[];
@@ -87,6 +89,11 @@ export interface ReaderNavigation {
 
 /** Penpal API exposed by the parent (Obsidian) to the reader iframe. */
 export type ParentAPI = {
+    /** Direct iframe bridge: callbacks stay in-process; only Worker RPC uses Comlink. */
+    getSDTPack: (options: {
+        password?: string;
+        onProgress?: (progress: number) => void;
+    }) => Promise<ReaderSDTPackResult>;
     getBlobUrlMap: () => Record<string, string>;
     handleEvent: (evt: ChildEvents) => void;
     isAndroidApp: () => boolean;
@@ -119,6 +126,16 @@ export type ParentAPI = {
         text: string,
     ) => { unload: () => void };
 };
+
+/** The upstream Reader owns successful SDT results for the lifetime of its document. */
+export type ReaderSDTPackResult =
+    | {
+          ok: true;
+          bytes: ArrayBuffer;
+          packVersion: number;
+          schemaMajorVersion: number;
+      }
+    | { ok: false; reason: "unavailable" | "failed" };
 
 /** Penpal API exposed by the reader iframe to the parent — init, navigate, annotate, destroy. */
 export type ChildAPI = {

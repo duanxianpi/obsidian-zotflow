@@ -49,7 +49,10 @@ export class EnhancementPackService {
         version?: string;
     }> {
         this.assertActive();
-        if (!(await this.adapter.exists(`${this.directory}/manifest.json`)))
+        if (
+            !(await this.adapter.exists(`${this.directory}/manifest.json`)) ||
+            !(await this.adapter.exists(`${this.directory}/main.js`))
+        )
             return { installed: false };
         return { installed: true, version: await this.readVersion() };
     }

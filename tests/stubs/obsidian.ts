@@ -20,6 +20,12 @@ export class Notice {
     }
 }
 
+export class Modal {
+    constructor() {
+        notAvailable("Modal");
+    }
+}
+
 export function requestUrl(): never {
     return notAvailable("requestUrl");
 }

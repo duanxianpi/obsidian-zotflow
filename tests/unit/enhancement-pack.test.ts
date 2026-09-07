@@ -10,6 +10,34 @@ import { sdtCompatibility } from "enhancement-pack/compatibility";
 import { packFixture } from "../fakes/enhancement-pack";
 
 describe("offline Pack container", () => {
+    test("reads an installed Pack with Obsidian's nosourcemap comment and still verifies resources", async () => {
+        const f = packFixture();
+        const bytes = new Uint8Array(
+            Buffer.concat([
+                Buffer.from(f.bytes),
+                Buffer.from("\n/* nosourcemap */"),
+            ]),
+        ).buffer;
+        const snapshot = await parsePack(bytes, "2.0.0", f.expected);
+        expect(
+            new Uint8Array(await decodeResource(snapshot, "model.onnx")),
+        ).toEqual(new Uint8Array(f.input[0]!));
+        snapshot.resources.get("model.onnx")!.entry.sha256 = "0".repeat(64);
+        await expect(decodeResource(snapshot, "model.onnx")).rejects.toThrow(
+            "Resource hash",
+        );
+    });
+    test.each([
+        "\n/* arbitrary comment */",
+        "\n/* nosourcemap */\nalert(1)",
+        "\n/* nosourcemap */\n/* nosourcemap */",
+    ])("rejects unknown installed-file suffix: %s", async (suffix) => {
+        const f = packFixture();
+        const bytes = new Uint8Array(
+            Buffer.concat([Buffer.from(f.bytes), Buffer.from(suffix)]),
+        ).buffer;
+        await expect(parsePack(bytes, "2.0.0", f.expected)).rejects.toThrow();
+    });
     test("hashes only the directory on load and rejects altered content at decode", async () => {
         const f = packFixture();
         const digest = vi.spyOn(crypto.subtle, "digest");
